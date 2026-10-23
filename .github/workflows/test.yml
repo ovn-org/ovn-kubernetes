@@ -585,6 +585,7 @@ jobs:
           # restarting ovn-k pods (day-2 reconfiguration), which would disrupt any concurrently running test jobs.
           # Dedicated no-overlay jobs are therefore required to cover feature combinations that may interact with
           # no-overlay (e.g. BGP route advertisements, network-segmentation) where implementations are not strictly orthogonal.
+          - {"target": "bgp-managed", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "managed", "no-overlay": "managed"}
           - {"target": "bgp-no-overlay-dynamic", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "no-overlay": "snat-enabled"}
           - {"target": "bgp-no-overlay", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "no-overlay": "true"}
           - {"target": "bgp-loose-isolation", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "advertised-udn-isolation-mode": "loose"}
@@ -629,8 +630,8 @@ jobs:
       ENABLE_UPLINK: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
       ENABLE_PRE_CONF_UDN_ADDR: "${{ matrix.ic == 'ic-single-node-zones' && (startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation') }}"
       ADVERTISED_UDN_ISOLATION_MODE: "${{ matrix.advertised-udn-isolation-mode }}"
-      # Override PARALLEL=true for Serial tests target to run Serial tests
-      PARALLEL: "${{ matrix.target != 'serial' }}"
+      # Managed BGP tests change the shared template and must run serially.
+      PARALLEL: "${{ matrix.target != 'serial' && matrix.target != 'bgp-managed' }}"
       OVN_UNPRIVILEGED_MODE: "${{ matrix.cni-mode == 'unprivileged' }}"
       MULTI_POD_SUBNET: true
       DYNAMIC_UDN_ALLOCATION: "${{ endsWith(matrix.target, '-dynamic') }}"
@@ -800,8 +801,8 @@ jobs:
           make -C test control-plane WHAT="EVPN"
         elif [ "${{ matrix.target }}" == "bgp" ] || [ "${{ matrix.target }}" == "bgp-no-overlay" ] || [ "${{ matrix.target }}" == "bgp-no-overlay-dynamic" ] || [ "${{ matrix.target }}" == "bgp-loose-isolation" ]; then
           make -C test control-plane
-        elif [ "${{ matrix.target }}" == "serial" ]; then
-          # Run only Serial tests with ginkgo focus
+        elif [ "${{ matrix.target }}" == "serial" ] || [ "${{ matrix.target }}" == "bgp-managed" ]; then
+          # Run the Serial suite with the environment's compatibility filters.
           make -C test control-plane WHAT=Serial
         elif [ "${{ matrix.target }}" == "tools" ]; then
           make -C go-controller build

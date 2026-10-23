@@ -1346,30 +1346,27 @@ func (c *Controller) generateFRRConfiguration(
 		targetRouter := router
 		targetRouter.Prefixes = advertisePrefixes
 
-		// For managed FRRConfigurations, the base config lists all nodes as
-		// neighbors. When generating the per-node FRRConfiguration, we need
-		// to exclude the node itself from its own neighbor list to avoid
-		// self-peering. Look up the node's primary interface addresses so
-		// we can filter them out below.
 		node, err := c.nodeLister.Get(nodeName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get node %s: %w", nodeName, err)
 		}
-		nodeIfAddr, err := util.GetNodeIfAddrAnnotation(node)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get node %s primary interface address annotation: %w", nodeName, err)
-		}
-		// a neighbor at one of the node's own addresses is the node itself
+		// The managed full-mesh template uses Kubernetes InternalIPs. Filter
+		// against that same source, not the primary interface annotation.
+		// User-provided templates own their peer lists, which may use other
+		// interfaces or VRFs where these addresses are not local.
 		var nodeAddrs []netip.Addr
-		for _, cidr := range []string{nodeIfAddr.IPv4, nodeIfAddr.IPv6} {
-			if cidr == "" {
-				continue
+		if source.Name == types.ManagedBGPConfigurationName && source.Namespace == config.ManagedBGP.FRRNamespace {
+			v4, v6 := util.GetNodeInternalAddrs(node)
+			for _, ip := range []net.IP{v4, v6} {
+				if addr, ok := netip.AddrFromSlice(ip); ok {
+					nodeAddrs = append(nodeAddrs, addr.Unmap())
+				}
 			}
-			prefix, err := netip.ParsePrefix(cidr)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse node %s primary interface address %q: %w", nodeName, cidr, err)
+			if len(nodeAddrs) == 0 {
+				// errPending applies an empty desired set in the caller. Retry instead
+				// so one initializing node cannot withdraw existing advertisements.
+				return nil, fmt.Errorf("waiting for InternalIP addresses for node %q", nodeName)
 			}
-			nodeAddrs = append(nodeAddrs, prefix.Addr().Unmap())
 		}
 
 		dpuHostGatewayNextHops, err := c.getDPUHostGatewayNextHops(node, selectedNetworks, matchedNetwork)
@@ -2336,14 +2333,16 @@ func nadNeedsUpdate(oldObj, newObj *nadtypes.NetworkAttachmentDefinition) bool {
 		oldObj.Annotations[types.OvnRouteAdvertisementsKey] != newObj.Annotations[types.OvnRouteAdvertisementsKey]
 }
 
+// nodeNeedsUpdate tracks inputs to advertisement generation, including the
+// InternalIPs used to filter managed self-peers.
 func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
 	return oldObj == nil || newObj == nil ||
 		!reflect.DeepEqual(oldObj.Labels, newObj.Labels) ||
+		!reflect.DeepEqual(oldObj.Status.Addresses, newObj.Status.Addresses) ||
 		util.NodeSubnetAnnotationChanged(oldObj, newObj) ||
 		// With dynamic UDN allocation in legacy layer2 topology, the tunnel
 		// ID allocation determines which nodes advertise the network.
 		oldObj.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] != newObj.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] ||
-		oldObj.Annotations[util.OvnNodeIfAddr] != newObj.Annotations[util.OvnNodeIfAddr] ||
 		util.NodePrimaryDPUHostAddrAnnotationChanged(oldObj, newObj) ||
 		util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
 		util.NodeChassisIDAnnotationChanged(oldObj, newObj) ||

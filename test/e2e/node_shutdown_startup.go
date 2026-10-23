@@ -12,9 +12,11 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -68,12 +70,12 @@ var _ = ginkgo.Describe("Node Shutdown and Startup", ginkgo.Serial, func() {
 		err := waitOVNKubernetesHealthy(f)
 		framework.ExpectNoError(err, "OVN-Kubernetes cluster should be healthy initially")
 
-		ginkgo.By("Check breth0 IP address families before shutdown")
-		initialIPFamilies, err := getBridgeIPAddressFamilies(testNodeName)
-		framework.ExpectNoError(err, "Should be able to get breth0 IP address families before shutdown")
-		framework.Logf("Node %s breth0 initial IP families: IPv4=%v, IPv6=%v", testNodeName, initialIPFamilies.hasIPv4, initialIPFamilies.hasIPv6)
+		ginkgo.By("Check gateway bridge IP address families before shutdown")
+		initialIPFamilies, err := getBridgeIPAddressFamilies(f, testNodeName)
+		framework.ExpectNoError(err, "Should be able to get gateway bridge IP address families before shutdown")
+		framework.Logf("Node %s gateway bridge initial IP families: IPv4=%v, IPv6=%v", testNodeName, initialIPFamilies.hasIPv4, initialIPFamilies.hasIPv6)
 		if !initialIPFamilies.hasIPv4 && !initialIPFamilies.hasIPv6 {
-			framework.Failf("breth0 should have at least one IP address family (IPv4 or IPv6) before shutdown, but found IPv4=%v, IPv6=%v", initialIPFamilies.hasIPv4, initialIPFamilies.hasIPv6)
+			framework.Failf("gateway bridge should have at least one IP address family (IPv4 or IPv6) before shutdown, but found IPv4=%v, IPv6=%v", initialIPFamilies.hasIPv4, initialIPFamilies.hasIPv6)
 		}
 
 		ginkgo.By("Shut down the node")
@@ -116,9 +118,9 @@ var _ = ginkgo.Describe("Node Shutdown and Startup", ginkgo.Serial, func() {
 		err = waitOVNKubernetesHealthy(f)
 		framework.ExpectNoError(err, "OVN-Kubernetes cluster should be healthy after node restart")
 
-		ginkgo.By("Confirm that breth0 on the node has IP addresses of expected families (that were moved from eth0)")
-		err = checkBridgeIPAddressFamilies(testNodeName, initialIPFamilies)
-		framework.ExpectNoError(err, "breth0 should have IP addresses of the same families as before restart")
+		ginkgo.By("Confirm that the gateway bridge on the node has IP addresses of expected families")
+		err = checkBridgeIPAddressFamilies(f, testNodeName, initialIPFamilies)
+		framework.ExpectNoError(err, "gateway bridge should have IP addresses of the same families as before restart")
 
 		framework.Logf("Node shutdown/startup test completed successfully for node %s", testNodeName)
 	})
@@ -145,49 +147,68 @@ func isControlPlaneNode(node corev1.Node) bool {
 	return false
 }
 
-// ipAddressFamilies represents which IP address families are present on an interface
+// ipAddressFamilies records the gateway bridge and its IP address families.
 type ipAddressFamilies struct {
-	hasIPv4 bool
-	hasIPv6 bool
+	hasIPv4    bool
+	hasIPv6    bool
+	bridgeName string
 }
 
-// getBridgeIPAddressFamilies checks which IP address families are present on breth0 interface
-func getBridgeIPAddressFamilies(nodeName string) (ipAddressFamilies, error) {
-	// TODO: change name of the bridge if running on non-kind clusters
-	stdout, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "show", "breth0"})
+// getBridgeIPAddressFamilies checks which IP address families are present on the current gateway bridge.
+func getBridgeIPAddressFamilies(f *framework.Framework, nodeName string) (ipAddressFamilies, error) {
+	// Read the annotation on each poll so recovery also verifies that the
+	// node has retained its original gateway bridge.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	node, err := f.ClientSet.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
-		return ipAddressFamilies{}, fmt.Errorf("failed to get breth0 interface info on node %s: %v", nodeName, err)
+		return ipAddressFamilies{}, fmt.Errorf("failed to get node %s: %w", nodeName, err)
+	}
+	gateway, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		return ipAddressFamilies{}, fmt.Errorf("failed to get gateway bridge on node %s: %w", nodeName, err)
+	}
+	stdout, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "addr", "show", "dev", gateway.BridgeID})
+	if err != nil {
+		return ipAddressFamilies{}, fmt.Errorf("failed to get gateway bridge %s interface info on node %s: %w", gateway.BridgeID, nodeName, err)
 	}
 
 	families := ipAddressFamilies{
-		hasIPv4: strings.Contains(stdout, "inet "),
-		hasIPv6: strings.Contains(stdout, "inet6 "),
+		bridgeName: gateway.BridgeID,
+		hasIPv4:    strings.Contains(stdout, "inet "),
+		hasIPv6:    strings.Contains(stdout, "inet6 "),
 	}
 
 	if !families.hasIPv4 && !families.hasIPv6 {
-		return families, fmt.Errorf("breth0 interface on node %s has no IP addresses (neither IPv4 nor IPv6)", nodeName)
+		return families, fmt.Errorf("gateway bridge %s on node %s has no IP addresses (neither IPv4 nor IPv6)", gateway.BridgeID, nodeName)
 	}
 
 	return families, nil
 }
 
-// checkBridgeIPAddressFamilies verifies that breth0 interface has IP addresses of the expected families
-func checkBridgeIPAddressFamilies(nodeName string, expectedFamilies ipAddressFamilies) error {
+// checkBridgeIPAddressFamilies verifies that the current gateway bridge has the expected IP families.
+func checkBridgeIPAddressFamilies(f *framework.Framework, nodeName string, expectedFamilies ipAddressFamilies) error {
 	return wait.PollImmediate(2*time.Second, 60*time.Second, func() (bool, error) {
-		currentFamilies, err := getBridgeIPAddressFamilies(nodeName)
+		currentFamilies, err := getBridgeIPAddressFamilies(f, nodeName)
 		if err != nil {
-			framework.Logf("Error checking breth0 IP families on node %s: %v", nodeName, err)
+			framework.Logf("Error checking gateway bridge IP families on node %s: %v", nodeName, err)
+			return false, nil
+		}
+
+		if currentFamilies.bridgeName != expectedFamilies.bridgeName {
+			framework.Logf("Node %s gateway bridge changed from %s to %s",
+				nodeName, expectedFamilies.bridgeName, currentFamilies.bridgeName)
 			return false, nil
 		}
 
 		// Check if current families match expected families
 		if currentFamilies.hasIPv4 == expectedFamilies.hasIPv4 && currentFamilies.hasIPv6 == expectedFamilies.hasIPv6 {
-			framework.Logf("Node %s breth0 has expected IP address families: IPv4=%v, IPv6=%v",
+			framework.Logf("Node %s gateway bridge has expected IP address families: IPv4=%v, IPv6=%v",
 				nodeName, currentFamilies.hasIPv4, currentFamilies.hasIPv6)
 			return true, nil
 		}
 
-		framework.Logf("Node %s breth0 IP families do not match yet - Current: IPv4=%v, IPv6=%v; Expected: IPv4=%v, IPv6=%v",
+		framework.Logf("Node %s gateway bridge IP families do not match yet - Current: IPv4=%v, IPv6=%v; Expected: IPv4=%v, IPv6=%v",
 			nodeName, currentFamilies.hasIPv4, currentFamilies.hasIPv6, expectedFamilies.hasIPv4, expectedFamilies.hasIPv6)
 		return false, nil
 	})
