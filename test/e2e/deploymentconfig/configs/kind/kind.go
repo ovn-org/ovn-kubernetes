@@ -7,11 +7,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -113,12 +115,18 @@ func (k *kind) PrimaryInterfaceName() string {
 	return "eth0"
 }
 
+// IsConfigurationEnabled reports whether a supported feature is enabled in the Kind deployment.
+// Unknown configurations are treated as disabled.
 func (k *kind) IsConfigurationEnabled(config api.Config) bool {
 	switch config {
 	case api.L3UDNMultiSubnetConfig:
 		// Currently enabled by default for Kind cluster. Could use
 		// an ENV variable check instead if we need variability later.
 		return true
+	case api.PreconfiguredUDNAddressesConfig:
+		value := deploymentconfig.GetTemplateContainerEnv(k.OVNKubernetesNamespace(), "daemonset/ovnkube-node",
+			"ovnkube-controller", "OVN_PRE_CONF_UDN_ADDR_ENABLE")
+		return strings.TrimSpace(value) == "true"
 	default:
 		return false
 	}

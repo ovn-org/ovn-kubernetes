@@ -21,6 +21,7 @@ import (
 
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 )
 
@@ -82,7 +83,7 @@ var _ = Describe("Network Segmentation: Default network multus annotation", feat
 		By("Creating the pod with the default network annotation and wait for readiness")
 		pod := e2epod.NewAgnhostPod(f.Namespace.Name, "static-ip-mac-pod", nil, nil, nil)
 		pod.Annotations = map[string]string{
-			"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":"ovn-kubernetes", "mac":%q, "ips": %s}]`, tc.mac, string(ips)),
+			"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":%q, "mac":%q, "ips": %s}]`, deploymentconfig.Get().OVNKubernetesNamespace(), tc.mac, string(ips)),
 		}
 		pod.Spec.Containers[0].Command = []string{"sleep", "infinity"}
 		pod = e2epod.NewPodClient(f).CreateSync(context.TODO(), pod)
@@ -103,7 +104,7 @@ var _ = Describe("Network Segmentation: Default network multus annotation", feat
 
 		By("Create second pod with default network annotation requesting the same MAC request")
 		pod2 := e2epod.NewAgnhostPod(f.Namespace.Name, "pod-mac-conflict", nil, nil, nil)
-		pod2.Annotations = map[string]string{"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":"ovn-kubernetes", "mac":%q}]`, tc.mac)}
+		pod2.Annotations = map[string]string{"v1.multus-cni.io/default-network": fmt.Sprintf(`[{"name":"default", "namespace":%q, "mac":%q}]`, deploymentconfig.Get().OVNKubernetesNamespace(), tc.mac)}
 		pod2.Spec.Containers[0].Command = []string{"sleep", "infinity"}
 		pod2, err = f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(context.Background(), pod2, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
@@ -131,13 +132,13 @@ var _ = Describe("Network Segmentation: Default network multus annotation", feat
 	},
 
 		Entry("should create the pod with the specified static IP and MAC address with persistent IPAM", testCase{
-			ips: []string{"103.0.0.3/16", "2014:100:200::3/60"},
-			mac: "02:A1:B2:C3:D4:E5",
+			ips:       []string{"103.0.0.3/16", "2014:100:200::3/60"},
+			mac:       "02:A1:B2:C3:D4:E5",
 			lifecycle: udnv1.IPAMLifecyclePersistent,
 		}),
 		Entry("should create the pod with the specified static IP and MAC address without persistent IPAM enabled", testCase{
-			ips:       []string{"103.0.0.3/16", "2014:100:200::3/60"},
-			mac:       "02:B1:C2:D3:E4:F5",
+			ips: []string{"103.0.0.3/16", "2014:100:200::3/60"},
+			mac: "02:B1:C2:D3:E4:F5",
 		}),
 	)
 
@@ -184,7 +185,7 @@ var _ = Describe("Network Segmentation: Default network multus annotation", feat
 
 			nse := []nadapi.NetworkSelectionElement{{
 				Name:       "default",
-				Namespace:  "ovn-kubernetes",
+				Namespace:  deploymentconfig.Get().OVNKubernetesNamespace(),
 				IPRequest:  filterCIDRs(f.ClientSet, "103.0.0.3/16", "2014:100:200::3/60"),
 				MacRequest: "02:A1:B2:C3:D4:E5",
 			}}

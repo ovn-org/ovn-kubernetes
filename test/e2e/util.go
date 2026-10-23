@@ -25,6 +25,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -1162,27 +1163,19 @@ func countACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerd
 	return count, nil
 }
 
-// getTemplateContainerEnv gets the value of an environment variable in a container template
-func getTemplateContainerEnv(namespace, resource, container, key string) string {
-	args := []string{"get", resource,
-		"-o=jsonpath='{.spec.template.spec.containers[?(@.name==\"" + container + "\")].env[?(@.name==\"" + key + "\")].value}'"}
-	value := e2ekubectl.RunKubectlOrDie(namespace, args...)
-	return strings.Trim(value, "'")
-}
-
 // setUnsetTemplateContainerEnv sets and unsets environment variables in a container
 // template and waits for the rollout
 func setUnsetTemplateContainerEnv(c kubernetes.Interface, namespace, resource, container string, set map[string]string, unset ...string) {
 	args := []string{"set", "env", resource, "-c", container}
 	env := make([]string, 0, len(set)+len(unset))
 	for k, v := range set {
-		currentValue := getTemplateContainerEnv(namespace, resource, container, k)
+		currentValue := deploymentconfig.GetTemplateContainerEnv(namespace, resource, container, k)
 		if currentValue != v {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
 		}
 	}
 	for _, k := range unset {
-		currentValue := getTemplateContainerEnv(namespace, resource, container, k)
+		currentValue := deploymentconfig.GetTemplateContainerEnv(namespace, resource, container, k)
 		if currentValue != "" {
 			env = append(env, fmt.Sprintf("%s-", k))
 		}
@@ -1315,9 +1308,10 @@ func isNetworkSegmentationEnabled() bool {
 	return present && val == "true"
 }
 
+// isICMPNetworkPolicyBypassEnabled checks the controller's OVN_ALLOW_ICMP_NETPOL setting.
 func isICMPNetworkPolicyBypassEnabled() bool {
 	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-	val := getTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_ALLOW_ICMP_NETPOL")
+	val := deploymentconfig.GetTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_ALLOW_ICMP_NETPOL")
 	return val == "true"
 }
 
@@ -1326,12 +1320,12 @@ func isLocalGWModeEnabled() bool {
 	return present && val == "local"
 }
 
+// isPreConfiguredUdnAddressesEnabled reports whether the deployment supports user-requested UDN IPs and MACs.
 func isPreConfiguredUdnAddressesEnabled() bool {
-	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-	val := getTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_PRE_CONF_UDN_ADDR_ENABLE")
-	return val == "true"
+	return deploymentconfig.Get().IsConfigurationEnabled(deploymentconfigapi.PreconfiguredUDNAddressesConfig)
 }
 
+// getNodeContainerName returns the OVN controller container name in the node DaemonSet.
 func getNodeContainerName() string {
 	return "ovnkube-controller"
 }
