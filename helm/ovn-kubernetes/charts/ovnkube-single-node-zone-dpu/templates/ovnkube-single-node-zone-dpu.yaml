@@ -100,9 +100,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnnb-db"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       # end of nb-ovsdb container
       # sb-ovsdb - v3
       - name: sb-ovsdb
@@ -161,9 +161,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnsb-db"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       # end of sb-ovsdb container
       # ovn-northd - v3
       - name: ovn-northd
@@ -208,9 +208,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-northd"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       # end of ovn-northd container
       # ovnkube-controller
       - name: ovnkube-controller
@@ -442,9 +442,9 @@ spec:
             path: /metrics
             port: {{ .Values.metricsPort }}
             scheme: HTTP
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 5
-          periodSeconds: 30
+          periodSeconds: 10
       # end of ovnkube-controller container
       # ovn-controller
       - name: ovn-controller
@@ -488,9 +488,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovn-controller"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
         # ovs-metrics-exporter - v3
       - name: ovs-metrics-exporter
         image: {{ include "getDPUImage" . }}

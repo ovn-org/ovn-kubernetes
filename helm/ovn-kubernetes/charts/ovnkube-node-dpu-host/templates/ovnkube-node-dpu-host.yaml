@@ -263,9 +263,9 @@ spec:
         readinessProbe:
           exec:
             command: ["/usr/bin/ovn-kube-util", "readiness-probe", "-t", "ovnkube-node"]
-          initialDelaySeconds: 30
+          initialDelaySeconds: 5
           timeoutSeconds: 30
-          periodSeconds: 60
+          periodSeconds: 10
       nodeSelector:
         kubernetes.io/os: "linux"
         k8s.ovn.org/dpu-host: ""
