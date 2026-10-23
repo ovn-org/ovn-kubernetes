@@ -52,7 +52,7 @@ RUN apt-get update && apt-get install -y \
     chmod 644 /etc/apt/sources.list.d/kubernetes.list && \
     apt-get update && apt-get install -y \
     openvswitch-switch openvswitch-common openvswitch-test \
-    ovn-central=${OVN_DEB_VERSION} ovn-common=${OVN_DEB_VERSION} ovn-host=${OVN_DEB_VERSION} kubectl tcpdump && \
+    ovn-central=${OVN_DEB_VERSION} ovn-common=${OVN_DEB_VERSION} ovn-host=${OVN_DEB_VERSION} kubectl tcpdump libjemalloc2 && \
     rm -rf /var/lib/apt/lists/*
 
 # Built in the ovnkube-builder stage, then the binaries are copied here.
