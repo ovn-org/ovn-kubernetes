@@ -230,6 +230,7 @@ nav:
     - Layer2TransitRouter: okeps/okep-5094-layer2-transit-router.md
     - MCP for Troubleshooting: okeps/okep-5494-ovn-kubernetes-mcp-server.md
     - Dynamic UDN Node Allocation: okeps/okep-5552-dynamic-udn-node-allocation.md
+    - Per-node UDN render state: okeps/okep-6788-per-node-udn-render-state.md
     - Connecting User Defined Networks: okeps/okep-5224-connecting-udns/okep-5224-connecting-udns.md
     - Connecting UDNs Discarded Alternatives: okeps/okep-5224-connecting-udns/discarded-alternatives.md
     - No-Overlay Mode: okeps/okep-5259-no-overlay.md
