@@ -912,7 +912,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 			startBothNetworks := func() string {
 				networks := []testNetwork{redNetwork, blueNetwork}
 				nodes := []testNode{
-					{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+					{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 						"red-network":  {"10.128.1.0/24", "fd00:10:128:1::/64"},
 						"blue-network": {"10.129.1.0/24", "fd00:10:129:1::/64"},
 					}},
@@ -1065,7 +1065,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						{name: "red-network", id: 1, topologyType: ovntypes.Layer3Topology},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"red-network": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 						}},
 					}
@@ -1087,7 +1087,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectNets, networkNets := getExpectedPortNetworks(
 						ovntest.MustParseIPNet("192.168.0.0/24"),
 						ovntest.MustParseIPNet("fd00:192:168::/64"),
-						1, // node1 has ID 1
+						4, // node1 has ID 4
 					)
 
 					// Verify connect router
@@ -1109,7 +1109,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectPortName := getConnectRouterToNetworkRouterPortName("ports-cnc", networks[0].name, "node1")
 					networkPortName := getNetworkRouterToConnectRouterPortName(networks[0].name, "node1", "ports-cnc")
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), networkPortName)
+						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), networkPortName)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					Eventually(func() error {
@@ -1142,7 +1142,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					nexthopV4, nexthopV6 := extractNexthops(networkNets)
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("ports-cnc"),
-							"ports-cnc", 1, 1,
+							"ports-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4, nexthopV6)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				})
@@ -1153,7 +1153,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						{name: "red-network", id: 1, topologyType: ovntypes.Layer3Topology},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"red-network": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 						}},
 					}
@@ -1189,7 +1189,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify no static routes on connect router
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("ports-cnc"),
-							"ports-cnc", 1, 1, 0)
+							"ports-cnc", 1, 4, 0)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				})
 
@@ -1200,7 +1200,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						{name: "blue-network", id: 2, topologyType: ovntypes.Layer3Topology},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"red-network":  {"10.128.1.0/24", "fd00:10:128:1::/64"},
 							"blue-network": {"10.129.1.0/24", "fd00:10:129:1::/64"},
 						}},
@@ -1255,7 +1255,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						connectPortName := getConnectRouterToNetworkRouterPortName("ports-cnc", net.name, "node1")
 						networkPortName := getNetworkRouterToConnectRouterPortName(net.name, "node1", "ports-cnc")
 						Eventually(func() error {
-							return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey(data.connectSubnetV4, data.connectSubnetV6, ovntypes.Layer3Topology, 1), networkPortName)
+							return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey(data.connectSubnetV4, data.connectSubnetV6, ovntypes.Layer3Topology, 4), networkPortName)
 						}).WithTimeout(5 * time.Second).Should(Succeed())
 
 						Eventually(func() error {
@@ -1266,7 +1266,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						connectNets, networkNets := getExpectedPortNetworks(
 							ovntest.MustParseIPNet(data.connectSubnetV4),
 							ovntest.MustParseIPNet(data.connectSubnetV6),
-							1, // node1 has ID 1
+							4, // node1 has ID 4
 						)
 
 						// Verify port on connect router (crtor-{cnc}-{network}-{node})
@@ -1301,7 +1301,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						nexthopV4, nexthopV6 := extractNexthops(networkNets)
 						Eventually(func() error {
 							return verifyRouterStaticRoutes(nbClient, getConnectRouterName("ports-cnc"),
-								"ports-cnc", net.id, 1,
+								"ports-cnc", net.id, 4,
 								data.nodeSubnetV4, data.nodeSubnetV6, nexthopV4, nexthopV6)
 						}).WithTimeout(5 * time.Second).Should(Succeed())
 					}
@@ -1314,7 +1314,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						{name: "blue-network", id: 2, topologyType: ovntypes.Layer3Topology},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"red-network":  {"10.128.1.0/24", "fd00:10:128:1::/64"},
 							"blue-network": {"10.129.1.0/24", "fd00:10:129:1::/64"},
 						}},
@@ -1365,7 +1365,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					for _, net := range networks {
 						Eventually(func() error {
 							return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("delete-cnc"),
-								"delete-cnc", net.id, 1, expectedPerIPFamily)
+								"delete-cnc", net.id, 4, expectedPerIPFamily)
 						}).WithTimeout(5 * time.Second).Should(Succeed())
 					}
 
@@ -1418,7 +1418,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							subnets: []string{"10.132.0.0/14/23", "fd00:10:132::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"net1": {"10.128.1.0/24", "fd00:10:128:1::/64"}, "net2": {"10.129.1.0/24", "fd00:10:129:1::/64"}}},
 					}
 					initialDB := createInitialDBWithRouters(networks)
@@ -1459,7 +1459,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					}
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("update-cnc"),
-							"update-cnc", 1, 1, expectedRouteCount)
+							"update-cnc", 1, 4, expectedRouteCount)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// Verify no policies since only 1 network (nothing to connect to)
@@ -1494,7 +1494,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify static routes for second network
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("update-cnc"),
-							"update-cnc", 2, 1, expectedRouteCount)
+							"update-cnc", 2, 4, expectedRouteCount)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// Now with 2 networks, policies should exist on both network routers
@@ -1518,7 +1518,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							subnets: []string{"10.132.0.0/14/23", "fd00:10:132::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"subnet-net1": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 							"subnet-net2": {"10.132.1.0/24", "fd00:10:132:1::/64"},
 						}},
@@ -1598,7 +1598,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							subnets: []string{"10.132.0.0/14/23", "fd00:10:132::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"remove-net1": {"10.128.1.0/24", "fd00:10:128:1::/64"}, "remove-net2": {"10.129.1.0/24", "fd00:10:129:1::/64"}}},
 					}
 					initialDB := createInitialDBWithRouters(networks)
@@ -1653,7 +1653,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						// Static routes
 						Eventually(func() error {
 							return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("remove-net-cnc"),
-								"remove-net-cnc", net.id, 1, expectedPerIPFamily)
+								"remove-net-cnc", net.id, 4, expectedPerIPFamily)
 						}).WithTimeout(5 * time.Second).Should(Succeed())
 					}
 
@@ -1693,13 +1693,13 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify first network still has routes
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("remove-net-cnc"),
-							"remove-net-cnc", 1, 1, expectedPerIPFamily)
+							"remove-net-cnc", 1, 4, expectedPerIPFamily)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// Verify second network has no routes
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("remove-net-cnc"),
-							"remove-net-cnc", 2, 1, 0)
+							"remove-net-cnc", 2, 4, 0)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// ========== UPDATE TO 0 NETWORKS ==========
@@ -1727,7 +1727,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify no routes on connect router
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("remove-net-cnc"),
-							"remove-net-cnc", 1, 1, 0)
+							"remove-net-cnc", 1, 4, 0)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				})
 
@@ -1738,7 +1738,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						{name: "l2-net2", id: 2, topologyType: ovntypes.Layer2Topology, subnets: []string{"10.201.0.0/16", "fd00:10:201::/48"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1},
+						{name: "node1", id: 4},
 					}
 					initialDB := createInitialDBWithRouters(networks)
 					start(initialDB, nodes, map[string]testNetwork{"l2-net1": networks[0], "l2-net2": networks[1]})
@@ -2004,7 +2004,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						subnets: []string{"10.128.0.0/14/23", "fd00:10:128::/48/64"}}
 					networks := []testNetwork{l2Net, l3Net}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"mixed-l3": {"10.128.1.0/24", "fd00:10:128:1::/64"}}},
 					}
 					initialDB := createInitialDBWithRouters(networks)
@@ -2050,7 +2050,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("mixed-cnc"),
-							"mixed-cnc", 2, 1, 0)
+							"mixed-cnc", 2, 4, 0)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// ========== ADD LAYER2 NETWORK (0 -> 1) ==========
@@ -2140,7 +2140,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					mixedL3ConnectPort := getConnectRouterToNetworkRouterPortName("mixed-cnc", l3Net.name, "node1")
 					mixedL3NetworkPort := getNetworkRouterToConnectRouterPortName(l3Net.name, "node1", "mixed-cnc")
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, mixedL3ConnectPort, getExpectedPortTunnelKey("192.168.1.0/24", "fd00:192:168:1::/64", ovntypes.Layer3Topology, 1), mixedL3NetworkPort)
+						return verifyRouterPortIsLocal(nbClient, mixedL3ConnectPort, getExpectedPortTunnelKey("192.168.1.0/24", "fd00:192:168:1::/64", ovntypes.Layer3Topology, 4), mixedL3NetworkPort)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					Eventually(func() error {
@@ -2155,7 +2155,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("mixed-cnc"),
-							"mixed-cnc", 2, 1, expectedPerIPFamily)
+							"mixed-cnc", 2, 4, expectedPerIPFamily)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// Verify policies on both routers pointing to each other
@@ -2198,7 +2198,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 
 					// Verify Layer3 port is local (node1 id=1)
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, mixedL3ConnectPort, getExpectedPortTunnelKey("192.168.1.0/24", "fd00:192:168:1::/64", ovntypes.Layer3Topology, 1), mixedL3NetworkPort)
+						return verifyRouterPortIsLocal(nbClient, mixedL3ConnectPort, getExpectedPortTunnelKey("192.168.1.0/24", "fd00:192:168:1::/64", ovntypes.Layer3Topology, 4), mixedL3NetworkPort)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					Eventually(func() error {
@@ -2214,7 +2214,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify Layer3 routes still exist
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("mixed-cnc"),
-							"mixed-cnc", 2, 1, expectedPerIPFamily)
+							"mixed-cnc", 2, 4, expectedPerIPFamily)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// Verify no policies on Layer3 (only 1 network now)
@@ -2248,7 +2248,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify no routes
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("mixed-cnc"),
-							"mixed-cnc", 2, 1, 0)
+							"mixed-cnc", 2, 4, 0)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				})
 			})
@@ -2265,7 +2265,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							subnets: []string{"10.128.0.0/14/23", "fd00:10:128::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"node-add-net": {"10.128.1.0/24", "fd00:10:128:1::/64"}}},
 					}
 					initialDB := createInitialDBWithRouters(networks)
@@ -2290,14 +2290,14 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectPortName := getConnectRouterToNetworkRouterPortName("node-add-cnc", "node-add-net", "node1")
 					networkPortName := getNetworkRouterToConnectRouterPortName("node-add-net", "node1", "node-add-cnc")
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), networkPortName)
+						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), networkPortName)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					// Verify port details for node1
 					connectNets1, networkNets1 := getExpectedPortNetworks(
 						ovntest.MustParseIPNet("192.168.0.0/24"),
 						ovntest.MustParseIPNet("fd00:192:168::/64"),
-						1, // node1 has ID 1
+						4, // node1 has ID 4
 					)
 					Eventually(func() error {
 						return verifyRouterPort(nbClient, connectPortName, "node-add-cnc", connectNets1)
@@ -2311,7 +2311,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					nexthopV4_1, nexthopV6_1 := extractNexthops(networkNets1)
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("node-add-cnc"),
-							"node-add-cnc", 1, 1,
+							"node-add-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4_1, nexthopV6_1)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
@@ -2362,7 +2362,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							subnets: []string{"10.128.0.0/14/23", "fd00:10:128::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"node-del-net": {"10.128.1.0/24", "fd00:10:128:1::/64"}}},
 						{name: "node2", id: 2, nodeSubnets: map[string]subnetPair{
 							"node-del-net": {"10.128.2.0/24", "fd00:10:128:2::/64"}}},
@@ -2391,10 +2391,10 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectNets1, networkNets1 := getExpectedPortNetworks(
 						ovntest.MustParseIPNet("192.168.0.0/24"),
 						ovntest.MustParseIPNet("fd00:192:168::/64"),
-						1, // node1 has ID 1
+						4, // node1 has ID 4
 					)
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, connectPortName1, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), networkPortName1)
+						return verifyRouterPortIsLocal(nbClient, connectPortName1, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), networkPortName1)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 					Eventually(func() error {
 						return verifyRouterPort(nbClient, connectPortName1, "node-del-cnc", connectNets1)
@@ -2421,7 +2421,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					nexthopV4_1, nexthopV6_1 := extractNexthops(networkNets1)
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("node-del-cnc"),
-							"node-del-cnc", 1, 1,
+							"node-del-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4_1, nexthopV6_1)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
@@ -2456,7 +2456,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify routes for node1 still exist with full details
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("node-del-cnc"),
-							"node-del-cnc", 1, 1,
+							"node-del-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4_1, nexthopV6_1)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				})
@@ -2510,7 +2510,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						context.Background(), "node1", metav1.GetOptions{})
 					Expect(err).NotTo(HaveOccurred())
 
-					node.Annotations[util.OvnNodeID] = "1"
+					node.Annotations[util.OvnNodeID] = "4"
 					_, err = fakeClientset.KubeClient.CoreV1().Nodes().Update(
 						context.Background(), node, metav1.UpdateOptions{})
 					Expect(err).NotTo(HaveOccurred())
@@ -2529,7 +2529,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectPortName := getConnectRouterToNetworkRouterPortName("nodeid-wait-cnc", "nodeid-wait-net", "node1")
 					networkPortName := getNetworkRouterToConnectRouterPortName("nodeid-wait-net", "node1", "nodeid-wait-cnc")
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), networkPortName)
+						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), networkPortName)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					Eventually(func() error {
@@ -2540,7 +2540,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectNets, networkNets := getExpectedPortNetworks(
 						ovntest.MustParseIPNet("192.168.0.0/24"),
 						ovntest.MustParseIPNet("fd00:192:168::/64"),
-						1, // node1 has ID 1
+						4, // node1 has ID 4
 					)
 					Eventually(func() error {
 						return verifyRouterPort(nbClient, connectPortName, "nodeid-wait-cnc", connectNets)
@@ -2553,7 +2553,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					nexthopV4, nexthopV6 := extractNexthops(networkNets)
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("nodeid-wait-cnc"),
-							"nodeid-wait-cnc", 1, 1,
+							"nodeid-wait-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4, nexthopV6)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				})
@@ -2566,7 +2566,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							subnets: []string{"10.128.0.0/14/23", "fd00:10:128::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"zone-update-net": {"10.128.1.0/24", "fd00:10:128:1::/64"}}},
 					}
 					initialDB := createInitialDBWithRouters(networks)
@@ -2591,7 +2591,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectPortName := getConnectRouterToNetworkRouterPortName("zone-update-cnc", "zone-update-net", "node1")
 					networkPortName := getNetworkRouterToConnectRouterPortName("zone-update-net", "node1", "zone-update-cnc")
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), networkPortName)
+						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), networkPortName)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					Eventually(func() error {
@@ -2602,7 +2602,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectNets, networkNets := getExpectedPortNetworks(
 						ovntest.MustParseIPNet("192.168.0.0/24"),
 						ovntest.MustParseIPNet("fd00:192:168::/64"),
-						1, // node1 has ID 1
+						4, // node1 has ID 4
 					)
 					Eventually(func() error {
 						return verifyRouterPort(nbClient, connectPortName, "zone-update-cnc", connectNets)
@@ -2615,7 +2615,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					nexthopV4, nexthopV6 := extractNexthops(networkNets)
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("zone-update-cnc"),
-							"zone-update-cnc", 1, 1,
+							"zone-update-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4, nexthopV6)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
@@ -2635,7 +2635,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					}).WithTimeout(2 * time.Second).Should(Succeed())
 
 					Consistently(func() error {
-						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), networkPortName)
+						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), networkPortName)
 					}).WithTimeout(2 * time.Second).Should(Succeed())
 
 					Consistently(func() error {
@@ -2645,7 +2645,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Routes remain programmed as well.
 					Consistently(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("zone-update-cnc"),
-							"zone-update-cnc", 1, 1,
+							"zone-update-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4, nexthopV6)
 					}).WithTimeout(2 * time.Second).Should(Succeed())
 				})
@@ -2659,7 +2659,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					}
 					nodes := []testNode{
 						// local-node matches the controller node identity.
-						{name: "local-node", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "local-node", id: 4, nodeSubnets: map[string]subnetPair{
 							"zone-net": {"10.128.1.0/24", "fd00:10:128:1::/64"}}},
 						// The other nodes are remote to this controller.
 						{name: "remote-node-1", id: 2, nodeSubnets: map[string]subnetPair{
@@ -2704,7 +2704,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					localConnectNets, localNetworkNets := getExpectedPortNetworks(
 						ovntest.MustParseIPNet("192.168.0.0/24"),
 						ovntest.MustParseIPNet("fd00:192:168::/64"),
-						1, // local-node has ID 1
+						4, // local-node has ID 1
 					)
 					Eventually(func() error {
 						return verifyRouterPort(nbClient, localConnectPort, "zone-cnc", localConnectNets)
@@ -2757,7 +2757,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Verify static routes on connect router for all 3 nodes
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("zone-cnc"),
-							"zone-cnc", 1, 1, expectedPerIPFamily) // local-node routes
+							"zone-cnc", 1, 4, expectedPerIPFamily) // local-node routes
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					Eventually(func() error {
@@ -2778,7 +2778,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 							subnets: []string{"10.128.0.0/14/23", "fd00:10:128::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"subnet-update-net": {"10.128.1.0/24", "fd00:10:128:1::/64"}}},
 					}
 					initialDB := createInitialDBWithRouters(networks)
@@ -2805,10 +2805,10 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					connectNets, networkNets := getExpectedPortNetworks(
 						ovntest.MustParseIPNet("192.168.0.0/24"),
 						ovntest.MustParseIPNet("fd00:192:168::/64"),
-						1, // node1 has ID 1
+						4, // node1 has ID 4
 					)
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), networkPortName)
+						return verifyRouterPortIsLocal(nbClient, connectPortName, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), networkPortName)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 					Eventually(func() error {
 						return verifyRouterPort(nbClient, connectPortName, "subnet-update-cnc", connectNets)
@@ -2821,7 +2821,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					nexthopV4, nexthopV6 := extractNexthops(networkNets)
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("subnet-update-cnc"),
-							"subnet-update-cnc", 1, 1,
+							"subnet-update-cnc", 1, 4,
 							"10.128.1.0/24", "fd00:10:128:1::/64", nexthopV4, nexthopV6)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
@@ -2851,7 +2851,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Routes should still exist with updated destination prefix
 					Eventually(func() error {
 						return verifyRouterStaticRoutes(nbClient, getConnectRouterName("subnet-update-cnc"),
-							"subnet-update-cnc", 1, 1,
+							"subnet-update-cnc", 1, 4,
 							"10.128.10.0/24", "fd00:10:128:10::/64", nexthopV4, nexthopV6)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 				})
@@ -2865,7 +2865,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						subnets:      []string{"10.128.0.0/14/23", "fd00:10:128::/48/64"},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"remote-activate-net": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 						}},
 						{name: "node2", id: 2, nodeSubnets: map[string]subnetPair{
@@ -2974,7 +2974,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					l2Net := testNetwork{name: "net2", id: 2, topologyType: ovntypes.Layer2Topology, subnets: []string{"10.132.0.0/16", "fd00:10:132::/48"}}
 					networks := []testNetwork{l3Net, l2Net}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"net1": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 						}},
 						{name: "node2", id: 2, nodeSubnets: map[string]subnetPair{
@@ -3017,7 +3017,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					l3ConnectPort := getConnectRouterToNetworkRouterPortName("multi-cnc", l3Net.name, "node1")
 					l3NetworkPort := getNetworkRouterToConnectRouterPortName(l3Net.name, "node1", "multi-cnc")
 					Eventually(func() error {
-						return verifyRouterPortIsLocal(nbClient, l3ConnectPort, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 1), l3NetworkPort)
+						return verifyRouterPortIsLocal(nbClient, l3ConnectPort, getExpectedPortTunnelKey("192.168.0.0/24", "fd00:192:168::/64", ovntypes.Layer3Topology, 4), l3NetworkPort)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 
 					Eventually(func() error {
@@ -3094,7 +3094,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 						{name: "net4", id: 4, topologyType: ovntypes.Layer3Topology, subnets: []string{"10.140.0.0/14/23", "fd00:10:140::/48/64"}},
 					}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"net1": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 							"net2": {"10.132.1.0/24", "fd00:10:132:1::/64"},
 							"net3": {"10.136.1.0/24", "fd00:10:136:1::/64"},
@@ -3185,7 +3185,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Routes for net1: node1 (local) and node2 (remote) subnets
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc1"),
-							"multi-cnc1", 1, 1, expectedPerIPFamily)
+							"multi-cnc1", 1, 4, expectedPerIPFamily)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc1"),
@@ -3194,7 +3194,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Routes for net2
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc1"),
-							"multi-cnc1", 2, 1, expectedPerIPFamily)
+							"multi-cnc1", 2, 4, expectedPerIPFamily)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc1"),
@@ -3205,7 +3205,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Routes for net3
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc2"),
-							"multi-cnc2", 3, 1, expectedPerIPFamily)
+							"multi-cnc2", 3, 4, expectedPerIPFamily)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc2"),
@@ -3214,7 +3214,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Routes for net4
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc2"),
-							"multi-cnc2", 4, 1, expectedPerIPFamily)
+							"multi-cnc2", 4, 4, expectedPerIPFamily)
 					}).WithTimeout(5 * time.Second).Should(Succeed())
 					Eventually(func() error {
 						return verifyRouterStaticRoutesCount(nbClient, getConnectRouterName("multi-cnc2"),
@@ -3539,7 +3539,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Start with only the red (L3) network
 					networks := []testNetwork{redNetwork}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"red-network": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 						}},
 					}
@@ -3756,7 +3756,7 @@ var _ = Describe("OVNKube Network Connect Controller Integration Tests", func() 
 					// Use only L3 network for simplicity
 					networks := []testNetwork{redNetwork}
 					nodes := []testNode{
-						{name: "node1", id: 1, nodeSubnets: map[string]subnetPair{
+						{name: "node1", id: 4, nodeSubnets: map[string]subnetPair{
 							"red-network": {"10.128.1.0/24", "fd00:10:128:1::/64"},
 						}},
 					}

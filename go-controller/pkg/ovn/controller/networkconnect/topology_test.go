@@ -567,7 +567,7 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "node1",
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-id": "1",
+							"k8s.ovn.org/node-id": "4",
 							util.OvnNodeChassisID: chassisIDForNode("node1"),
 						},
 					},
@@ -631,7 +631,7 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "node1", // local node
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-id": "1",
+							"k8s.ovn.org/node-id": "4",
 							util.OvnNodeChassisID: chassisIDForNode("node1"),
 						},
 					},
@@ -1019,7 +1019,7 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node1",
 			Annotations: map[string]string{
-				util.OvnNodeID:             "1",
+				util.OvnNodeID:             "4",
 				util.OvnNodeChassisID:      chassisIDForNode("node1"),
 				"k8s.ovn.org/node-subnets": string(node1SubnetsBytes),
 			},
@@ -1668,7 +1668,7 @@ func TestEnsureRoutingPoliciesOps(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "node1",
 						Annotations: map[string]string{
-							"k8s.ovn.org/node-id": "1",
+							"k8s.ovn.org/node-id": "4",
 							util.OvnNodeChassisID: chassisIDForNode("node1"),
 						},
 					},
@@ -2025,7 +2025,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 			}{
 				{
 					name: "node1",
-					id:   "1",
+					id:   "4",
 					nodeSubnets: map[string]string{
 						"test-network": "10.128.1.0/24",
 					},
@@ -2055,7 +2055,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 			}{
 				{
 					name: "node1",
-					id:   "1",
+					id:   "4",
 					nodeSubnets: map[string]string{
 						"test-network": "10.128.1.0/24",
 					},
@@ -2090,7 +2090,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 				id          string
 				nodeSubnets map[string]string
 			}{
-				{name: "node1", id: "1", nodeSubnets: nil},
+				{name: "node1", id: "4", nodeSubnets: nil},
 			},
 			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalRouter{UUID: "connect-router-uuid", Name: "connect_router_test-cnc"},
@@ -2117,7 +2117,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 			}{
 				{
 					name: "node1",
-					id:   "1",
+					id:   "4",
 					nodeSubnets: map[string]string{
 						// Dual-stack format: JSON array
 						"test-network": `["10.128.1.0/24", "fd00:10:128:1::/64"]`,
@@ -2147,7 +2147,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 				id          string
 				nodeSubnets map[string]string
 			}{
-				{name: "node1", id: "1", nodeSubnets: nil},
+				{name: "node1", id: "4", nodeSubnets: nil},
 			},
 			initialDB: []libovsdbtest.TestData{
 				&nbdb.LogicalRouter{UUID: "connect-router-uuid", Name: "connect_router_test-cnc"},
@@ -2173,7 +2173,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 			}{
 				{
 					name: "node1",
-					id:   "1",
+					id:   "4",
 					nodeSubnets: map[string]string{
 						"test-network": "fd00:10:128:1::/64",
 					},

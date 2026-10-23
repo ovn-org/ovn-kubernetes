@@ -49,7 +49,7 @@ var _ = ginkgo.DescribeTable("Layer2 EgressIP gateway next hop uses the GR trans
 			TransitSubnet: "100.88.0.0/16,fd97::/64",
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		node := getNodeObj("node1", map[string]string{util.OvnNodeID: "1"}, nil)
+		node := getNodeObj("node1", map[string]string{util.OvnNodeID: "4"}, nil)
 		if annotated {
 			node.Annotations[util.Layer2TopologyVersion] = util.TransitRouterTopoVersion
 		}
@@ -66,10 +66,10 @@ var _ = ginkgo.DescribeTable("Layer2 EgressIP gateway next hop uses the GR trans
 		gomega.Expect(nextHop.String()).To(gomega.Equal(expectedTransitIP))
 		gomega.Expect(nextHop.Equal(joinIP.IP)).To(gomega.BeFalse(), "must not fall back to the legacy GR join IP")
 	},
-	ginkgo.Entry("IPv4 without annotation", false, false, "100.88.0.3", "100.65.0.1"),
-	ginkgo.Entry("IPv6 without annotation", true, false, "fd97::3", "fd98::1"),
-	ginkgo.Entry("IPv4 with annotation", false, true, "100.88.0.3", "100.65.0.1"),
-	ginkgo.Entry("IPv6 with annotation", true, true, "fd97::3", "fd98::1"),
+	ginkgo.Entry("IPv4 without annotation", false, false, "100.88.0.9", "100.65.0.4"),
+	ginkgo.Entry("IPv6 without annotation", true, false, "fd97::9", "fd98::4"),
+	ginkgo.Entry("IPv4 with annotation", false, true, "100.88.0.9", "100.65.0.4"),
+	ginkgo.Entry("IPv6 with annotation", true, true, "fd97::9", "fd98::4"),
 )
 
 var _ = ginkgo.Describe("EgressIP Operations for user defined network with topology L2", func() {
@@ -86,11 +86,11 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 		v4Net1                   = "20.128.0.0/14"
 		v4Node1Net1              = "20.128.0.0/16"
 		v4Pod1IPNode1Net1        = "20.128.0.5"
-		node1DefaultRtoJIP       = "100.64.0.1"
+		node1DefaultRtoJIP       = "100.64.0.4"
 		node1DefaultRtoJIPCIDR   = node1DefaultRtoJIP + "/16"
-		node1Network1JoinIP      = "100.65.0.1"
+		node1Network1JoinIP      = "100.65.0.4"
 		node1Network1JoinCIDR    = node1Network1JoinIP + "/16"
-		node1Network1TransitIP   = "100.88.0.3"
+		node1Network1TransitIP   = "100.88.0.9"
 		node1Network1TransitCIDR = node1Network1TransitIP + "/31"
 		podName3                 = "egress-pod3"
 		v4Node1Tsp               = "100.88.0.2"
@@ -208,7 +208,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					util.OvnNodeID:                                "1",
+					util.OvnNodeID:                                "4",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -595,7 +595,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					util.OvnNodeID:                                "1",
+					util.OvnNodeID:                                "4",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -1124,7 +1124,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					util.OvnNodeID:                                "1",
+					util.OvnNodeID:                                "4",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -1628,7 +1628,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					util.OvnNodeID:                                "1",
+					util.OvnNodeID:                                "4",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2004,7 +2004,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					util.OvnNodeID:                                "1",
+					util.OvnNodeID:                                "4",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2370,7 +2370,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					util.OvnNodeID:                                "1",
+					util.OvnNodeID:                                "4",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),
@@ -2754,7 +2754,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
-					util.OvnNodeID:                                "1",
+					util.OvnNodeID:                                "4",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
 					util.OvnNodeL3GatewayConfig: fmt.Sprintf(`{"%s":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"%s", "next-hop":"%s", "next-hops": ["%s"]},
 "default":{"mode":"local","mac-address":"7e:57:f8:f0:3c:49", "ip-address":"192.168.126.12/24", "next-hop": "192.168.126.1", "next-hops": ["192.168.126.1"]}}`, networkName1, v4Net1, gwIP, gwIP),

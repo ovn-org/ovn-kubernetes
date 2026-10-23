@@ -1147,7 +1147,7 @@ func UpdateNodeIDAnnotation(annotations map[string]interface{}, nodeID int) map[
 
 // GetNodeID returns the id of the node set in the 'OvnNodeID' node annotation.
 // Returns InvalidNodeID (-1) if the 'OvnNodeID' node annotation is not set, if the value is
-// not an integer value, or if it falls outside [0, types.MaxNodeIDs]. On error also returns:
+// not an integer value, or if it falls outside [types.MinNodeID, types.MaxNodeIDs]. On error also returns:
 // - NewAnnotationNotSetError if the annotation is missing
 // - strconv.Atoi error if the annotation value is not a valid integer
 func GetNodeID(node *corev1.Node) (int, error) {
@@ -1163,9 +1163,9 @@ func GetNodeID(node *corev1.Node) (int, error) {
 	// Existing annotations must be checked too, so the value has to be
 	// kept inside the range the ID allocator and the OVN resources derived from
 	// it can represent.
-	if id < 0 || id > types.MaxNodeIDs {
-		return InvalidNodeID, fmt.Errorf("%s annotation %q on node %s is out of range [0, %d]",
-			OvnNodeID, nodeID, node.Name, types.MaxNodeIDs)
+	if id < types.MinNodeID || id > types.MaxNodeIDs {
+		return InvalidNodeID, fmt.Errorf("%s annotation %q on node %s is out of range [%d, %d]",
+			OvnNodeID, nodeID, node.Name, types.MinNodeID, types.MaxNodeIDs)
 	}
 	return id, nil
 }

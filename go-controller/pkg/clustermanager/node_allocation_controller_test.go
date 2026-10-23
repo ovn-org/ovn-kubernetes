@@ -27,7 +27,7 @@ import (
 )
 
 func TestSyncNodeIDsOutOfRange(t *testing.T) {
-	for _, invalid := range []int{-2, types.MaxNodeIDs + 1, math.MaxInt} {
+	for _, invalid := range []int{0, 1, -2, types.MaxNodeIDs + 1, math.MaxInt} {
 		t.Run(fmt.Sprint(invalid), func(t *testing.T) {
 			g := gomega.NewWithT(t)
 			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
@@ -36,7 +36,7 @@ func TestSyncNodeIDsOutOfRange(t *testing.T) {
 				Name: "invalid", Annotations: map[string]string{util.OvnNodeID: strconv.Itoa(invalid)},
 			}}
 			healthyNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
-				Name: "healthy", Annotations: map[string]string{util.OvnNodeID: "10"},
+				Name: "healthy", Annotations: map[string]string{util.OvnNodeID: "2"},
 			}}
 			client := util.GetOVNClientset(invalidNode, healthyNode).GetClusterManagerClientset()
 			wf, err := factory.NewClusterManagerWatchFactory(client)
@@ -60,16 +60,16 @@ func TestSyncNodeIDsOutOfRange(t *testing.T) {
 					g.Expect(nodeID).To(gomega.Equal(allocator.GetID(name)))
 					g.Expect(node.Annotations[util.OvnTransitSwitchPortAddr]).NotTo(gomega.BeEmpty())
 					if name == "healthy" {
-						g.Expect(nodeID).To(gomega.Equal(10))
+						g.Expect(nodeID).To(gomega.Equal(2))
 					}
 				}
 			}, 5*time.Second, 10*time.Millisecond).Should(gomega.Succeed())
 			nodes := []interface{}{invalidNode, healthyNode}
 			replacement := allocator.GetID("invalid")
-			if replacement < 2 || replacement > types.MaxNodeIDs || replacement == 10 {
+			if replacement < 2 || replacement > types.MaxNodeIDs || replacement == 2 {
 				t.Fatalf("invalid replacement: %d", replacement)
 			}
-			if allocator.GetID("healthy") != 10 {
+			if allocator.GetID("healthy") != 2 {
 				t.Fatal("healthy node ID changed")
 			}
 			if err = nac.syncNodeIDs(nodes); err != nil {
@@ -79,7 +79,7 @@ func TestSyncNodeIDsOutOfRange(t *testing.T) {
 				t.Fatal("replacement changed on resync")
 			}
 			next, err := allocator.AllocateID("another")
-			if err != nil || next == replacement || next == 10 {
+			if err != nil || next == replacement || next == 2 {
 				t.Fatalf("subsequent allocation: %d, %v", next, err)
 			}
 		})

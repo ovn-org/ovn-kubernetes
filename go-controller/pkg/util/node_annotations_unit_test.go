@@ -622,6 +622,23 @@ func TestGetNodeID(t *testing.T) {
 			res:     5,
 		},
 		{
+			desc:    "lowest valid id",
+			inpNode: nodeWithID(fmt.Sprint(types.MinNodeID)),
+			res:     types.MinNodeID,
+		},
+		{
+			desc:        "reserved zero id",
+			inpNode:     nodeWithID("0"),
+			res:         InvalidNodeID,
+			errExpected: true,
+		},
+		{
+			desc:        "reserved one id",
+			inpNode:     nodeWithID("1"),
+			res:         InvalidNodeID,
+			errExpected: true,
+		},
+		{
 			desc:    "highest valid id",
 			inpNode: nodeWithID(fmt.Sprintf("%d", types.MaxNodeIDs)),
 			res:     types.MaxNodeIDs,

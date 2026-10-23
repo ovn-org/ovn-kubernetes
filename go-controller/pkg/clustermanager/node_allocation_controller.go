@@ -134,7 +134,7 @@ func needsNodeAllocation(node *corev1.Node) bool {
 		return false
 	}
 
-	if nodeID, err := util.GetNodeID(node); err != nil || nodeID < types.MinNodeID {
+	if _, err := util.GetNodeID(node); err != nil {
 		return true
 	}
 	if _, ok := node.Annotations[util.OvnTransitSwitchPortAddr]; !ok {
