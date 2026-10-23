@@ -1,6 +1,7 @@
 ---
 title: Universal Connectivity
 hide:
+  - navigation
   - toc
 ---
 
@@ -8,22 +9,56 @@ hide:
 
 User-defined networks and cross-network connectivity in OVN-Kubernetes.
 
-**[UserDefinedNetwork](user-defined-networks.md)**
+<div class="landing-grid" markdown>
+
+<div class="landing-card" markdown>
+
+## UserDefinedNetwork
 
 Create isolated tenant networks with Layer2 or Layer3 topologies.
 
-**[Connecting UserDefinedNetworks](cluster-network-connect.md)**
+[Read more](user-defined-networks.md){ .landing-btn }
 
-Enable controlled connectivity between isolated User Defined Networks.
+</div>
 
-**[Uplinks for UserDefinedNetworks](uplinks.md)**
+<div class="landing-card" markdown>
 
-Expose User Defined Networks to external physical networks via uplink interfaces.
+## Uplinks for UserDefinedNetworks
 
-**[Dynamic UDN Node Allocation](dynamic-udn.md)**
+Expose User-Defined Networks to external physical networks via uplink interfaces.
+
+[Read more](uplinks.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Connecting UserDefinedNetworks
+
+Enable controlled connectivity between isolated User-Defined Networks.
+
+[Read more](cluster-network-connect.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## Dynamic UDN Node Allocation
 
 Allocate subnets to nodes on demand as pods are scheduled onto them.
 
-**[DHCP IPAM for Localnet Networks](dhcp-ipam-localnet.md)**
+[Read more](dynamic-udn.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## DHCP IPAM for Localnet Networks
 
 Delegate IP assignment on Localnet networks to an external DHCP server.
+
+[Read more](dhcp-ipam-localnet.md){ .landing-btn }
+
+</div>
+
+</div>

@@ -1,6 +1,7 @@
 ---
 title: Multi-Networking
 hide:
+  - navigation
   - toc
 ---
 
@@ -8,14 +9,36 @@ hide:
 
 Attach pods to multiple networks with multi-homing and multi-network policies.
 
-**[Multihoming](multi-homing.md)**
+<div class="landing-grid" markdown>
+
+<div class="landing-card" markdown>
+
+## Multihoming
 
 Connect pods to additional networks beyond the cluster default.
 
-**[MultiNetworkPolicies](multi-network-policies.md)**
+[Read more](multi-homing.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## MultiNetworkPolicies
 
 Apply network policies to secondary network interfaces on multi-homed pods.
 
-**[MultiNetworkRails](multi-vtep.md)**
+[Read more](multi-network-policies.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## MultiNetworkRails
 
 Use multiple VTEP interfaces for parallel network paths across nodes.
+
+[Read more](multi-vtep.md){ .landing-btn }
+
+</div>
+
+</div>

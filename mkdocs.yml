@@ -66,10 +66,13 @@ plugins:
       minify_html: true
   - git-revision-date-localized:
       enable_creation_date: true
+      enable_git_follow: false
       type: date
       fallback_to_build_date: true
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - meta
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji
@@ -124,6 +127,9 @@ nav:
     - Launching OVN-Kubernetes on Ubuntu: installation/INSTALL.UBUNTU.md
     - Configuration Guide: getting-started/configuration.md
     - Requirements: features/requirements.md
+    - Deploying Workloads: getting-started/example-pod-creation.md
+    - Deploying Services: getting-started/example-service-creation.md
+    - Setup and Building: getting-started/building-ovn-kubernetes.md
   - Developer Guide:
       - developer-guide/index.md
       - Contributing Guide: governance/CONTRIBUTING.md

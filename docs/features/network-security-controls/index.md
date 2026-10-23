@@ -1,6 +1,7 @@
 ---
 title: Network Security Controls
 hide:
+  - navigation
   - toc
 ---
 
@@ -8,18 +9,46 @@ hide:
 
 Network policies and firewall rules for controlling traffic in OVN-Kubernetes.
 
-**[AdminNetworkPolicy](admin-network-policy.md)**
+<div class="landing-grid" markdown>
+
+<div class="landing-card" markdown>
+
+## AdminNetworkPolicy
 
 Cluster-scoped network policies that take precedence over namespace-level NetworkPolicy.
 
-**[NetworkPolicy](network-policy.md)**
+[Read more](admin-network-policy.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## NetworkPolicy
 
 Standard Kubernetes NetworkPolicy enforcement via OVN ACLs.
 
-**[EgressFirewall](egress-firewall.md)**
+[Read more](network-policy.md){ .landing-btn }
+
+</div>
+
+<div class="landing-card" markdown>
+
+## EgressFirewall
 
 Restrict which external destinations pods in a namespace can reach.
 
-**[DNS Name Resolution](dns-name-resolution.md)**
+[Read more](egress-firewall.md){ .landing-btn }
 
-DNS-based matching for EgressFirewall rules.
+</div>
+
+<div class="landing-card" markdown>
+
+## DNS Name Resolution
+
+Integrate EgressFirewall DNS rules with CoreDNS for dynamic address resolution.
+
+[Read more](dns-name-resolution.md){ .landing-btn }
+
+</div>
+
+</div>
