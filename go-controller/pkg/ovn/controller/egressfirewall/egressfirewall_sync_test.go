@@ -22,7 +22,9 @@ import (
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressfirewalllisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -328,4 +330,142 @@ func TestEFControllerSync_AddsCIDRExclusionWhenPrimaryNetworkAddsOverlappingSubn
 	require.True(t, ok)
 	require.Equal(t, pgName, entry.pgName)
 	require.True(t, util.IsIPNetsEqual(subnetsForNetInfo(netInfoAfter), entry.subnets))
+}
+
+// TestEFControllerSync_InvalidRuleUpdateKeepsExistingACLs covers the sync() error path: when an
+// update introduces an invalid rule, addEgressFirewall must fail before any stale-ACL cleanup runs,
+// so the ACLs (and cache entry) from the last successfully applied EgressFirewall are left in place.
+func TestEFControllerSync_InvalidRuleUpdateKeepsExistingACLs(t *testing.T) {
+	require.NoError(t, config.PrepareTestConfig())
+
+	const (
+		namespace = "namespace1"
+		zone      = "global"
+	)
+
+	// No UDN involved: this test only cares about sync()'s validation-failure path, which is
+	// independent of which network backs the namespace, so the default network is enough.
+	networkManager := &fakenetworkmanager.FakeNetworkManager{}
+
+	ownerController := types.DefaultNetworkName + "-network-controller"
+	pgName := libovsdbutil.GetPortGroupName(getNamespacePortGroupDbIDs(namespace, ownerController))
+
+	initialDB := libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{
+			&nbdb.PortGroup{
+				Name: pgName,
+				ExternalIDs: map[string]string{
+					libovsdbops.OwnerTypeKey.String():       libovsdbops.NamespaceOwnerType,
+					libovsdbops.OwnerControllerKey.String(): ownerController,
+					libovsdbops.ObjectNameKey.String():      namespace,
+				},
+			},
+		},
+	}
+	nbClient, _, cleanup, err := libovsdbtest.NewNBSBTestHarness(initialDB)
+	require.NoError(t, err)
+	t.Cleanup(cleanup.Cleanup)
+
+	nsIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	require.NoError(t, nsIndexer.Add(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}))
+	namespaceLister := corelisters.NewNamespaceLister(nsIndexer)
+
+	efIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+	ef := &egressfirewallapi.EgressFirewall{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            egressFirewallName,
+			Namespace:       namespace,
+			ResourceVersion: "1",
+		},
+		Spec: egressfirewallapi.EgressFirewallSpec{
+			Egress: []egressfirewallapi.EgressFirewallRule{
+				{
+					Type: egressfirewallapi.EgressFirewallRuleAllow,
+					To: egressfirewallapi.EgressFirewallDestination{
+						CIDRSelector: "10.128.1.0/24",
+					},
+				},
+			},
+		},
+		Status: egressfirewallapi.EgressFirewallStatus{
+			Messages: []string{types.GetZoneStatus(zone, EgressFirewallAppliedCorrectly)},
+		},
+	}
+	require.NoError(t, efIndexer.Add(ef))
+	efLister := egressfirewalllisters.NewEgressFirewallLister(efIndexer)
+
+	oc := &EFController{
+		name:            "test",
+		zone:            zone,
+		cache:           syncmap.NewSyncMap[*cacheEntry](),
+		nbClient:        nbClient,
+		kube:            &kube.KubeOVN{EgressFirewallClient: egressfirewallfake.NewSimpleClientset()},
+		namespaceLister: namespaceLister,
+		efLister:        efLister,
+		networkManager:  networkManager,
+		ruleCounter:     sync.Map{},
+		dnsNameResolver: noopDNSNameResolver{},
+	}
+
+	// Pre-seed rule counter so status updates don't affect global metrics.
+	oc.ruleCounter.Store(namespace+"/"+egressFirewallName, uint32(len(ef.Spec.Egress)))
+
+	// First sync creates the ACL for the valid rule.
+	require.NoError(t, oc.sync(namespace+"/"+egressFirewallName))
+
+	p := libovsdbops.GetPredicate[*nbdb.ACL](oc.GetEgressFirewallACLDbIDs(namespace, 0), nil)
+	acls, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, p)
+	require.NoError(t, err)
+	require.Len(t, acls, 1)
+	originalMatch := acls[0].Match
+
+	entry, ok := oc.cache.Load(namespace)
+	require.True(t, ok)
+	require.Equal(t, "1", entry.efResourceVersion)
+
+	// Update to an invalid rule: a CIDR selector without a mask fails validation in addEgressFirewall.
+	// Mutate a copy rather than the object already stored in the indexer.
+	invalidEF := ef.DeepCopy()
+	invalidEF.Spec.Egress[0].To.CIDRSelector = "10.128.1.0"
+	invalidEF.ResourceVersion = "2"
+	require.NoError(t, efIndexer.Update(invalidEF))
+
+	// The second sync must fail validation before attempting any OVSDB write at all (and therefore
+	// before stale-ACL cleanup runs). Swap in a Transact-panicking client to prove that, rather than
+	// only inferring it from the ACL/cache state afterward.
+	oc.nbClient = &panicTransactClient{Client: nbClient}
+	require.NotPanics(t, func() {
+		err = oc.sync(namespace + "/" + egressFirewallName)
+	})
+	require.Error(t, err)
+
+	acls, err = libovsdbops.FindACLsWithPredicate(nbClient, p)
+	require.NoError(t, err)
+	require.Len(t, acls, 1)
+	require.Equal(t, originalMatch, acls[0].Match)
+
+	entry, ok = oc.cache.Load(namespace)
+	require.True(t, ok)
+	require.Equal(t, "1", entry.efResourceVersion, "cache must still reflect the last successfully applied EgressFirewall")
+
+	// Same check for an unmasked IPv6 selector: validation is address-family agnostic, but dual-stack
+	// inputs should be exercised explicitly rather than assumed to follow the IPv4 case.
+	invalidEFv6 := ef.DeepCopy()
+	invalidEFv6.Spec.Egress[0].To.CIDRSelector = "2001:db8::1"
+	invalidEFv6.ResourceVersion = "3"
+	require.NoError(t, efIndexer.Update(invalidEFv6))
+
+	require.NotPanics(t, func() {
+		err = oc.sync(namespace + "/" + egressFirewallName)
+	})
+	require.Error(t, err)
+
+	acls, err = libovsdbops.FindACLsWithPredicate(nbClient, p)
+	require.NoError(t, err)
+	require.Len(t, acls, 1)
+	require.Equal(t, originalMatch, acls[0].Match)
+
+	entry, ok = oc.cache.Load(namespace)
+	require.True(t, ok)
+	require.Equal(t, "1", entry.efResourceVersion, "cache must still reflect the last successfully applied EgressFirewall")
 }
