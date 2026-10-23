@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -1081,29 +1082,67 @@ func SetSupportsIPv6InterfaceForwarding(val bool) {
 	supportsIPv6InterfaceForwarding.Store(val)
 }
 
-// The sysctl fs interface uses slash as the path separator and allows interface names to
-// contain dots. But the CLI uses dots as the separator and expects interface names to
-// have been rewritten to use slashes instead.
-func sysctlIfName(ifName string) string {
-	return strings.ReplaceAll(ifName, ".", "/")
+// hostProcSysNet is where the chart mounts the host's /proc/sys/net for an
+// unprivileged ovnkube-node. The runtime mounts the container's own /proc/sys
+// read-only unless the container is privileged. A hostPath of /proc/sys/net
+// is the same procfs without that flag: the pod runs in the host network namespace,
+// and CAP_NET_ADMIN is all the kernel asks for to write them.
+const hostProcSysNet = "/host/proc/sys/net"
+
+// procSysNet is the directory sysctl writes go to.
+var procSysNet = detectProcSysNet()
+
+// procSysNetIsTestDir is set when tests redirect procSysNet to a scratch
+// directory, where the sysctl files have to be created rather than found.
+var procSysNetIsTestDir bool
+
+func detectProcSysNet() string {
+	if _, err := os.Stat(hostProcSysNet); err == nil {
+		return hostProcSysNet
+	}
+	return "/proc/sys/net"
+}
+
+// SysctlNetPath returns the file for the net.* sysctl at path, given relative
+// to net/, e.g. "ipv4/conf/eth0/forwarding".
+func SysctlNetPath(path string) string {
+	return filepath.Join(procSysNet, path)
+}
+
+// SetSysctlNet writes value to the net.* sysctl at path, given relative to
+// net/. Interface names are used as-is: unlike the sysctl CLI, the file path
+// has no separator conflict with dots in interface names.
+func SetSysctlNet(path, value string) error {
+	file := SysctlNetPath(path)
+	if procSysNetIsTestDir {
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(file, []byte(value), 0o644); err != nil {
+		return fmt.Errorf("failed to set sysctl %s to %s: %w", file, value, err)
+	}
+	return nil
+}
+
+// SetProcSysNetForTesting redirects sysctl writes to dir and returns a function
+// restoring the previous location.
+func SetProcSysNetForTesting(dir string) func() {
+	prev, prevIsTestDir := procSysNet, procSysNetIsTestDir
+	procSysNet, procSysNetIsTestDir = dir, true
+	return func() { procSysNet, procSysNetIsTestDir = prev, prevIsTestDir }
 }
 
 // SetForwardingModeForInterface updates the forwarding options for the specified interface
 func SetForwardingModeForInterface(ifName string) error {
 	if config.IPv4Mode {
-		setVal := fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", sysctlIfName(ifName))
-		stdout, stderr, err := RunSysctl("-w", setVal)
-		if err != nil || stdout != setVal {
-			return fmt.Errorf("could not set the correct IPv4 forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-				ifName, stdout, stderr, err)
+		if err := SetSysctlNet(fmt.Sprintf("ipv4/conf/%s/forwarding", ifName), "1"); err != nil {
+			return fmt.Errorf("could not set the correct IPv4 forwarding value for interface %s: %w", ifName, err)
 		}
 	}
 	if config.IPv6Mode && SupportsIPv6InterfaceForwarding() {
-		setVal := fmt.Sprintf("net.ipv6.conf.%s.force_forwarding = 1", sysctlIfName(ifName))
-		stdout, stderr, err := RunSysctl("-w", setVal)
-		if err != nil || stdout != setVal {
-			return fmt.Errorf("could not set the correct IPv6 forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-				ifName, stdout, stderr, err)
+		if err := SetSysctlNet(fmt.Sprintf("ipv6/conf/%s/force_forwarding", ifName), "1"); err != nil {
+			return fmt.Errorf("could not set the correct IPv6 forwarding value for interface %s: %w", ifName, err)
 		}
 	}
 	return nil
@@ -1116,11 +1155,8 @@ const rpFilterLooseMode = "2"
 // managementport interface.
 // NOTE: v6 doesn't have rp_filter strict mode block
 func SetRPFilterLooseModeForInterface(ifName string) error {
-	setVal := fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", sysctlIfName(ifName), rpFilterLooseMode)
-	stdout, stderr, err := RunSysctl("-w", setVal)
-	if err != nil || stdout != setVal {
-		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
-			ifName, stdout, stderr, err)
+	if err := SetSysctlNet(fmt.Sprintf("ipv4/conf/%s/rp_filter", ifName), rpFilterLooseMode); err != nil {
+		return fmt.Errorf("could not set the correct rp_filter value for interface %s: %w", ifName, err)
 	}
 	return nil
 }
@@ -1135,11 +1171,8 @@ func IsIPv6SysctlSupported() bool {
 }
 
 func SetIPv6KeepAddrOnDownForInterface(ifName string) error {
-	setVal := fmt.Sprintf("net.ipv6.conf.%s.keep_addr_on_down = 1", sysctlIfName(ifName))
-	stdout, stderr, err := RunSysctl("-w", setVal)
-	if err != nil || stdout != setVal {
-		return fmt.Errorf("could not enable IPv6 address retention for interface %s: stdout: %v, stderr: %v, err: %v",
-			ifName, stdout, stderr, err)
+	if err := SetSysctlNet(fmt.Sprintf("ipv6/conf/%s/keep_addr_on_down", ifName), "1"); err != nil {
+		return fmt.Errorf("could not enable IPv6 address retention for interface %s: %w", ifName, err)
 	}
 	return nil
 }

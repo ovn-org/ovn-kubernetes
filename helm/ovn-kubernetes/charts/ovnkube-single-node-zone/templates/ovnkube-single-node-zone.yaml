@@ -273,6 +273,13 @@ spec:
         volumeMounts:
         # Common mounts
         # for the iptables wrapper
+        {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) true }}
+        # the container's own /proc/sys is read-only without privileged: true;
+        # the host's /proc/sys/net is the same network namespace and is writable
+        # with NET_ADMIN, so the gateway sysctls are written through this mount
+        - mountPath: /host/proc/sys/net
+          name: host-proc-sys-net
+        {{- end }}
         - mountPath: /host
           name: host-slash
           readOnly: true
@@ -301,7 +308,7 @@ spec:
           name: host-run-cni
         - mountPath: /var/run/netns
           name: host-netns
-          mountPropagation: Bidirectional
+          mountPropagation: HostToContainer
         - mountPath: /var/run/openvswitch/
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
@@ -657,6 +664,12 @@ spec:
       - name: host-netns
         hostPath:
           path: /var/run/netns
+      {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) true }}
+      - name: host-proc-sys-net
+        hostPath:
+          path: /proc/sys/net
+          type: Directory
+      {{- end }}
       - name: host-var-log-ovs
         hostPath:
           path: /var/log/openvswitch

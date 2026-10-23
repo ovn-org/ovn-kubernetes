@@ -37,3 +37,9 @@ func TestNodeSuite(t *testing.T) {
 	util.SetSupportsIPv6InterfaceForwarding(false)
 	RunSpecs(t, "Node Suite")
 }
+
+// Every spec writes sysctls into its own scratch directory, so a spec sees
+// only the values it set itself.
+var _ = BeforeEach(func() {
+	DeferCleanup(util.SetProcSysNetForTesting(GinkgoT().TempDir()))
+})

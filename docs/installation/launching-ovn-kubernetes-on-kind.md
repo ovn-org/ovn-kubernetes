@@ -162,6 +162,10 @@ usage: kind-helm.sh [--delete]
 -me  | --multicast-enabled                    Enable multicast. DEFAULT: Disabled
 -ho  | --hybrid-enabled                       Enable hybrid overlay. DEFAULT: Disabled
 -obs | --observability                        Enable observability. DEFAULT: Disabled
+-upm | --unprivileged-mode                    Run ovnkube-node without privileged: true.
+                                              Installs the OVS client tools (ovs-vsctl, ovs-ofctl) on the
+                                              kind nodes, which the CNI plugin needs in this mode.
+                                              DEFAULT: Disabled
 -el  | --ovn-empty-lb-events                  Enable empty-lb-events generation for LB without backends. DEFAULT: Disabled
 -ii  | --install-ingress                      Flag to install Ingress Components.
                                               DEFAULT: Don't install ingress components.
@@ -250,6 +254,40 @@ sudo setenforce 1
 ```bash
 sudo PATH=$PATH:/usr/local/go/bin ./kind.sh -ep podman
 ```
+
+### Unprivileged ovnkube-node
+
+`./kind.sh -upm` deploys ovnkube-node without `privileged: true`, with only
+`NET_ADMIN` added to its capabilities. In this mode ovnkube-node only hands
+the CNI plugin, `ovn-k8s-cni-overlay` in `/opt/cni/bin`, the pod's addresses,
+and the plugin running on the node creates the veth, plugs it into `br-int`
+and waits for the OVN binding itself. For that the plugin runs `ovs-vsctl`
+and `ovs-ofctl` from the node's `PATH`, talking to the `ovs-node` pod through
+the sockets it exposes in `/var/run/openvswitch`.
+
+The container's own `/proc/sys` is read-only without `privileged: true`, so
+the chart mounts the host's `/proc/sys/net` at `/host/proc/sys/net` and
+ovnkube-node writes its per-interface sysctls (forwarding, `rp_filter`,
+`keep_addr_on_down`) there. The pod runs in the host network namespace, so
+these are the same entries, and `NET_ADMIN` is all the kernel requires.
+
+Kubelet probes to primary user defined network pods are not supported in
+this mode: the nftables rule that lets kubelet through the host isolation
+can only be loaded from the host cgroup namespace. The node reports
+`UDNKubeletProbesNotSupported`, and the e2e tests skip their kubelet probe
+assertions. See the
+[UDN documentation](../features/user-defined-networks/user-defined-networks.md#when-kubelet-probes-are-not-supported)
+for the workarounds.
+
+The kind node image does not ship these tools, so the script installs the
+`openvswitch-switch` package on every node before deploying OVN-Kubernetes.
+Only `-upm` strictly needs it, but the tools are installed for every
+deployment because they make debugging OVS from the node easier. The
+package's systemd units are masked first, so the node never starts OVS
+daemons of its own; only the client binaries are used. Nodes that already
+have both binaries are left untouched.
+
+On a non-kind cluster OVS usually runs on the host.
 
 ### Usage Notes 
 

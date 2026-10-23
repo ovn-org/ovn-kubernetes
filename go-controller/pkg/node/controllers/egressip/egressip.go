@@ -276,9 +276,8 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 			if err = c.ruleManager.Add(getNodeIPFwMarkIPRule(netlink.FAMILY_V4)); err != nil {
 				return fmt.Errorf("failed to create IPv4 rule for node IPs: %v", err)
 			}
-			stdout, _, err := util.RunSysctl("-w", "net.ipv4.conf.all.src_valid_mark=1")
-			if err != nil || stdout != "net.ipv4.conf.all.src_valid_mark = 1" {
-				return fmt.Errorf("failed to set sysctl net.ipv4.conf.all.src_valid_mark to 1")
+			if err := util.SetSysctlNet("ipv4/conf/all/src_valid_mark", "1"); err != nil {
+				return err
 			}
 		}
 		if c.v6 {

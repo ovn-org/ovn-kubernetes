@@ -565,19 +565,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 									// flush this on all 3 nodes else we will run into the
 									// bug: https://issues.redhat.com/browse/OCPBUGS-7609.
 									// TODO: Revisit this once https://bugzilla.redhat.com/show_bug.cgi?id=2169839 is fixed.
-									ovnKubernetesNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-									ovnKubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnKubernetesNamespace).List(context.TODO(), metav1.ListOptions{
-										LabelSelector: "app=ovnkube-node",
-									})
-									if err != nil {
-										framework.Failf("could not get ovnkube-node pods: %v", err)
-									}
-									for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
-										framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
-										_, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, "exec", ovnKubeNodePod.Name, "--container", getNodeContainerName(), "--",
-											"ip", "route", "flush", "cache")
-										framework.ExpectNoError(err, "Flushing the ip route cache failed")
-									}
+									flushRouteCacheOnAllNodes(f.ClientSet)
 								}
 							}
 						})

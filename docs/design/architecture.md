@@ -39,10 +39,12 @@ and more distributed.
         * Translates K8s objects into OVN logical entities - stores them in OVN databases
         * Stores OVN entities in NorthBound Database (NBDB)
         * Manages pod subnet allocation to nodes (pod IPAM)
-        * Runs the CNI executable (CNI ADD/DEL)
+        * Serves CNI ADD/DEL requests from the `ovn-k8s-cni-overlay` plugin that
+        the container runtime invokes on the node
         * Digests the IPAM annotation set on pod
-        * Creates the veth pair for the pod
-        * Creates the ovs port on bridge
+        * Creates the veth pair for the pod and the ovs port on bridge. In
+        unprivileged mode (`--unprivileged-mode`) it only returns the pod's
+        addresses to the plugin, which creates the veth and the ovs port itself
         * Programs the necessary iptables and gateway service flows on a 
     * nbdb container:
         * Native OVN component

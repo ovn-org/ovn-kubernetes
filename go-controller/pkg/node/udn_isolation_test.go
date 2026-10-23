@@ -896,6 +896,25 @@ add rule inet ovn-kubernetes udn-isolation ip6 daddr @udn-open-ports-icmp-v6 met
 		)
 	})
 
+	It("leaves the kubelet rule out in unprivileged mode and reports it", func() {
+		config.UnprivilegedMode = true
+		DeferCleanup(func() { config.UnprivilegedMode = false })
+		cgroupRoot := GinkgoT().TempDir()
+		Expect(os.MkdirAll(filepath.Join(cgroupRoot, "kubelet.slice", kubeletCgroupName), 0o755)).To(Succeed(), "create cgroup dir")
+
+		manager.setKubeletCgroupPath(cgroupRoot)
+
+		Expect(manager.kubeletCgroupPath).To(BeEmpty(), "the kubelet rule is left out even though kubelet's cgroup exists")
+		var event string
+		Expect(recorder.Events).To(Receive(&event), "the node is told")
+		Expect(event).To(ContainSubstring("UDNKubeletProbesNotSupported"), "event reason")
+		Expect(event).To(ContainSubstring("unprivileged mode"), "event blames the mode, not the host")
+
+		// host isolation is still set up, only the kubelet rule is missing.
+		Expect(manager.setupUDNIsolationFromHost()).To(Succeed())
+		Expect(nodenft.MatchNFTRules(expectedDump(""), fakeNFT.Dump())).To(Succeed(), "UDN pods stay isolated from the host")
+	})
+
 	It("reports unsupported kubelet probes on the node", func() {
 		manager.reportKubeletProbesUnsupported("the node uses cgroup v1")
 
