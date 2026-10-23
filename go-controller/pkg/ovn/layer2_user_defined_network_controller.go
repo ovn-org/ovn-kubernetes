@@ -301,7 +301,7 @@ func NewLayer2UserDefinedNetworkController(
 			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
-			nil)
+		)
 	}
 
 	// enable multicast support for UDN only for primaries + multicast enabled

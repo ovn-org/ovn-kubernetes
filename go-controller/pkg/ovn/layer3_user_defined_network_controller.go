@@ -282,7 +282,7 @@ func NewLayer3UserDefinedNetworkController(
 			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
-			nil)
+		)
 		oc.podAnnotationAllocator = podAnnotationAllocator
 	}
 
