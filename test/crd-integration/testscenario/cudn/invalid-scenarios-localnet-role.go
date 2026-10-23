@@ -3,7 +3,7 @@
 
 package cudn
 
-import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
+import "github.com/ovn-kubernetes/ovn-kubernetes/test/crd-integration/testscenario"
 
 var LocalnetInvalidRole = []testscenario.ValidateCRScenario{
 	{
@@ -26,7 +26,6 @@ spec:
 		Description: "role is primary",
 		ExpectedErr: `spec.network.localnet.role: Unsupported value: "Primary": supported values: "Secondary"`,
 		Manifest: `
----
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork
 metadata:

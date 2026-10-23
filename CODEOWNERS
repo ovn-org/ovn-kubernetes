@@ -29,18 +29,18 @@
 /test/e2e/network_segmentation_localnet.go @maiqueb @qinqon @ormergi
 /test/e2e/localnet-underlay.go @maiqueb @qinqon @ormergi
 /test/e2e/network_segmentation_preconfigured_layer2.go @maiqueb @qinqon @ormergi
-/test/e2e/testscenario/cudn/valid-scenarios-localnet.go @maiqueb @qinqon @ormergi
-/test/e2e/testscenario/cudn/invalid-scenarios-localnet-vlan.go @maiqueb @qinqon @ormergi
-/test/e2e/testscenario/cudn/invalid-scenarios-localnet-subnets.go @maiqueb @qinqon @ormergi
-/test/e2e/testscenario/cudn/invalid-scenarios-localnet-role.go @maiqueb @qinqon @ormergi
-/test/e2e/testscenario/cudn/invalid-scenarios-localnet-phynetname.go @maiqueb @qinqon @ormergi
-/test/e2e/testscenario/cudn/invalid-scenarios-localnet-mtu.go @maiqueb @qinqon @ormergi
 # Unit tests
 /go-controller/pkg/ovn/kubevirt_test.go @maiqueb @qinqon @ormergi
 /go-controller/pkg/ovn/multihoming_test.go @maiqueb @qinqon @ormergi
 /go-controller/pkg/ovn/multipolicy_test.go @maiqueb @qinqon @ormergi
 /go-controller/pkg/ovn/layer2_user_defined_network_controller_test.go @maiqueb @qinqon @ormergi
 /go-controller/pkg/util/multi_network_test.go @maiqueb @qinqon @ormergi
+/test/crd-integration/testscenario/cudn/valid-scenarios-localnet.go @maiqueb @qinqon @ormergi
+/test/crd-integration/testscenario/cudn/invalid-scenarios-localnet-vlan.go @maiqueb @qinqon @ormergi
+/test/crd-integration/testscenario/cudn/invalid-scenarios-localnet-subnets.go @maiqueb @qinqon @ormergi
+/test/crd-integration/testscenario/cudn/invalid-scenarios-localnet-role.go @maiqueb @qinqon @ormergi
+/test/crd-integration/testscenario/cudn/invalid-scenarios-localnet-phynetname.go @maiqueb @qinqon @ormergi
+/test/crd-integration/testscenario/cudn/invalid-scenarios-localnet-mtu.go @maiqueb @qinqon @ormergi
 # Production code
 /go-controller/pkg/kubevirt/ @maiqueb @qinqon @ormergi
 /go-controller/pkg/util/arp.go @maiqueb @qinqon @ormergi

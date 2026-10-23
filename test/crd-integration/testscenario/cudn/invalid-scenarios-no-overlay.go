@@ -3,7 +3,7 @@
 
 package cudn
 
-import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
+import "github.com/ovn-kubernetes/ovn-kubernetes/test/crd-integration/testscenario"
 
 var NoOverlayInvalid = []testscenario.ValidateCRScenario{
 	{

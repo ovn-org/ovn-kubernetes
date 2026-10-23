@@ -22,7 +22,7 @@ var _ = Describe("ClusterNetworkConnect: API validations", feature.NetworkConnec
 			})
 			for _, s := range scenarios {
 				By(s.Description)
-				_, stderr, err := runKubectlInputWithFullOutput("", s.Manifest, "create", "-f", "-")
+				_, stderr, err := e2ekubectl.NewKubectlCommand("", "apply", "-f", "-").WithStdinData(s.Manifest).ExecWithFullOutput()
 				Expect(err).To(HaveOccurred(), "should fail to create invalid ClusterNetworkConnect CR")
 				Expect(stderr).To(ContainSubstring(s.ExpectedErr))
 			}

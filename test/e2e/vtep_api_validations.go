@@ -22,7 +22,7 @@ var _ = Describe("EVPN: VTEP API validations", feature.RouteAdvertisements, feat
 			})
 			for _, s := range scenarios {
 				By(s.Description)
-				_, stderr, err := runKubectlInputWithFullOutput("", s.Manifest, "create", "-f", "-")
+				_, stderr, err := e2ekubectl.NewKubectlCommand("", "apply", "-f", "-").WithStdinData(s.Manifest).ExecWithFullOutput()
 				Expect(err).To(HaveOccurred(), "should fail to create invalid VTEP CR")
 				Expect(stderr).To(ContainSubstring(s.ExpectedErr))
 			}
@@ -55,7 +55,7 @@ var _ = Describe("EVPN: VTEP API validations", feature.RouteAdvertisements, feat
 				Expect(err).NotTo(HaveOccurred(), "should create initial VTEP CR successfully")
 
 				By("Updating VTEP (should fail): " + s.Description)
-				_, stderr, err := runKubectlInputWithFullOutput("", s.Manifest, "apply", "-f", "-")
+				_, stderr, err := e2ekubectl.NewKubectlCommand("", "apply", "-f", "-").WithStdinData(s.Manifest).ExecWithFullOutput()
 				Expect(err).To(HaveOccurred(), "should fail to update VTEP CR")
 				Expect(stderr).To(ContainSubstring(s.ExpectedErr))
 			}
