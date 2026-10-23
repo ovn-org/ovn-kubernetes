@@ -25,7 +25,6 @@ spec:
         component: network
         type: infra
         kubernetes.io/os: "linux"
-      annotations:
     spec:
       {{- if .Values.global.imagePullSecretName }}
       imagePullSecrets:
