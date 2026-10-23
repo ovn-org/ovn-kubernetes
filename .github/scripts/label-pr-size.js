@@ -9,6 +9,7 @@ function isIgnoredFile(filename) {
   // CRD output paths are defined in go-controller/hack/update-codegen.sh.
   // Files under apis/ can lack "generated" in their names.
   return /(^|\/)go\.sum$/.test(filename) ||
+    filename.startsWith('LICENSES/') ||
     filename.split('/').includes('vendor') ||
     isModelgenOutput(filename) ||
     /^helm\/ovn-kubernetes\/crds\/k8s\.ovn\.org_[^/]+\.yaml$/.test(filename) ||
