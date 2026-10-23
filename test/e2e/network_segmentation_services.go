@@ -116,7 +116,7 @@ var _ = Describe("Network Segmentation: services", feature.NetworkSegmentation, 
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnName), 30*time.Second, time.Second).Should(Succeed())
+			Eventually(clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnName), 30*time.Second, time.Second).Should(Succeed())
 			nodes, err := e2enode.GetBoundedReadySchedulableNodes(ctx, cs, 1)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nodes.Items).To(HaveLen(1))
