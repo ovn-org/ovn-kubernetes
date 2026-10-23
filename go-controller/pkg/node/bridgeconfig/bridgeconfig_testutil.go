@@ -51,6 +51,7 @@ func TestBridgeConfig(brName string) *BridgeConfiguration {
 	return &BridgeConfiguration{
 		bridgeName: brName,
 		gwIface:    brName,
+		netConfig:  map[string]*BridgeUDNConfiguration{},
 	}
 }
 
@@ -68,6 +69,13 @@ func TestBridgeConfigWithGatewayRepresentor(brName, gwIfaceRep string) *BridgeCo
 	bridge := TestBridgeConfig(brName)
 	bridge.gwIfaceRep = gwIfaceRep
 	return bridge
+}
+
+// SetIPs allows tests to configure bridge IP addresses for verifying VRF route computation
+func (b *BridgeConfiguration) SetIPs(ips []*net.IPNet) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.ips = ips
 }
 
 func (b *BridgeConfiguration) GetNetConfigLen() int {

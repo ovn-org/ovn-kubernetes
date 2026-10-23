@@ -26,6 +26,22 @@ host full control over outbound path selection.
 Note: For some no-overlay CUDN paths, OVN network-scoped router SNAT-exemption/NAT
 objects also participate, so the exact SNAT mechanism is network-type dependent.
 
+### UDN per-network VRF connected-subnet route
+
+In local gateway mode each user-defined network has its own VRF routing table. So
+that traffic from a UDN to a node on the gateway bridge's L2 subnet is forwarded
+directly (resolved via ARP/ND) instead of falling through to the VRF default route,
+ovn-kubernetes programs a connected-subnet route into the VRF, e.g.
+`192.168.1.0/24 dev breth0 scope link src 192.168.1.5`. The route is tagged with
+the ovn-kubernetes route protocol (`types.OVNKProtocol`), which marks ownership: it
+is reconciled using the kernel routing table as the source of truth, so a stale
+route survives a restart and is reclaimed on the next reconcile. It is also
+refreshed when the node's gateway bridge addresses change at runtime.
+
+VRF-Lite networks with their own Uplink are excluded: the kernel already migrates
+the Uplink interface's connected prefix route into the network's VRF when the
+interface is enslaved, so ovn-kubernetes does not program its own route for them.
+
 ## When to Use Which
 
 | Consideration | Shared | Local |
