@@ -25,9 +25,8 @@ spec:
         type: infra
         kubernetes.io/os: "linux"
         ovn-db-pod: "true"
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
+      priorityClassName: "system-node-critical"
       {{- if .Values.global.imagePullSecretName }}
       imagePullSecrets:
       - name: {{ .Values.global.imagePullSecretName }}

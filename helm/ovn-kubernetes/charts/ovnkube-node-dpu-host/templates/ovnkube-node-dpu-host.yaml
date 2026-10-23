@@ -30,7 +30,7 @@ spec:
       imagePullSecrets:
       - name: {{ .Values.global.imagePullSecretName }}
       {{- end }}
-      priorityClassName: "system-cluster-critical"
+      priorityClassName: "system-node-critical"
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
