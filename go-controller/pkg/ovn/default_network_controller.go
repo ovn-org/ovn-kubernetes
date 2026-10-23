@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -21,6 +22,7 @@ import (
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
+	podcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/pod"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressqoslisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -157,10 +159,11 @@ func NewDefaultNetworkController(
 	portCache *PortCache,
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
+	podReconciler *podcontroller.Controller,
 ) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, routeImportManager, observManager, eIPController, portCache, addressSetManager, nodeReconciler)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, routeImportManager, observManager, eIPController, portCache, addressSetManager, nodeReconciler, podReconciler)
 }
 
 func newDefaultNetworkControllerCommon(
@@ -175,9 +178,13 @@ func newDefaultNetworkControllerCommon(
 	portCache *PortCache,
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
+	podReconciler *podcontroller.Controller,
 ) (*DefaultNetworkController, error) {
 	if nodeReconciler == nil {
 		return nil, fmt.Errorf("shared node reconciler is required for the default network controller")
+	}
+	if podReconciler == nil {
+		return nil, fmt.Errorf("shared pod reconciler is required for the default network controller")
 	}
 
 	defaultNetInfo := &util.DefaultNetInfo{}
@@ -220,26 +227,28 @@ func newDefaultNetworkControllerCommon(
 
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
-			CommonNetworkControllerInfo: *cnci,
-			controllerName:              types.DefaultNetworkControllerName,
-			ReconcilableNetInfo:         defaultNetInfo,
-			lsManager:                   lsm.NewLogicalSwitchManager(),
-			logicalPortCache:            portCache,
-			namespaces:                  make(map[string]*namespaceInfo),
-			namespacesMutex:             sync.Mutex{},
-			addressSetFactory:           addressSetFactory,
-			networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-			sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-			stopChan:                    defaultStopChan,
-			wg:                          defaultWg,
-			zoneICHandler:               zoneICHandler,
-			cancelableCtx:               util.NewCancelableContext(),
-			observManager:               observManager,
-			networkManager:              networkManager,
-			routeImportManager:          routeImportManager,
-			addressSetManager:           addressSetManager,
-			nodeReconciler:              nodeReconciler,
-			nodeAnnotationCache:         nodeReconciler.AnnotationCache(),
+			CommonNetworkControllerInfo:  *cnci,
+			controllerName:               types.DefaultNetworkControllerName,
+			ReconcilableNetInfo:          defaultNetInfo,
+			lsManager:                    lsm.NewLogicalSwitchManager(),
+			logicalPortCache:             portCache,
+			namespaces:                   make(map[string]*namespaceInfo),
+			namespacesMutex:              sync.Mutex{},
+			addressSetFactory:            addressSetFactory,
+			networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+			networkPolicyKeysByNamespace: syncmap.NewSyncMap[sets.Set[string]](),
+			sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+			stopChan:                     defaultStopChan,
+			wg:                           defaultWg,
+			zoneICHandler:                zoneICHandler,
+			cancelableCtx:                util.NewCancelableContext(),
+			observManager:                observManager,
+			networkManager:               networkManager,
+			routeImportManager:           routeImportManager,
+			addressSetManager:            addressSetManager,
+			nodeReconciler:               nodeReconciler,
+			nodeAnnotationCache:          nodeReconciler.AnnotationCache(),
+			podReconciler:                podReconciler,
 		},
 		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC:                       eIPController,
@@ -258,6 +267,7 @@ func newDefaultNetworkControllerCommon(
 			cnci.nodeName,
 		)
 	}
+	oc.podHandler = oc
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets.
 	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
@@ -275,9 +285,8 @@ func newDefaultNetworkControllerCommon(
 }
 
 func (oc *DefaultNetworkController) initRetryFramework() {
-	// Init the retry framework for pods, namespaces, network policies, egress firewalls,
+	// Init the retry framework for namespaces, network policies, egress firewalls,
 	// egress IP (and dependent namespaces, pods, nodes), cloud private ip config.
-	oc.retryPods = oc.newRetryFramework(factory.PodType)
 	oc.retryEgressIPs = oc.newRetryFramework(factory.EgressIPType)
 	oc.retryEgressIPNamespaces = oc.newRetryFramework(factory.EgressIPNamespaceType)
 	oc.retryEgressIPPods = oc.newRetryFramework(factory.EgressIPPodType)
@@ -355,6 +364,7 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
+	oc.DeregisterPodHandler()
 	oc.DeregisterNodeHandler()
 	if oc.dnsNameResolver != nil {
 		oc.dnsNameResolver.Shutdown()
@@ -909,16 +919,8 @@ func (h *defaultNetworkControllerEventHandler) AreResourcesEqual(obj1, obj2 inte
 	return h.baseHandler.areResourcesEqual(h.objType, obj1, obj2)
 }
 
-// GetInternalCacheEntry returns the internal cache entry for this object, given an object and its type.
-// This is now used only for pods, which will get their the logical port cache entry.
-func (h *defaultNetworkControllerEventHandler) GetInternalCacheEntry(obj interface{}) interface{} {
-	switch h.objType {
-	case factory.PodType:
-		pod := obj.(*corev1.Pod)
-		return h.oc.getPortInfo(pod)
-	default:
-		return nil
-	}
+func (h *defaultNetworkControllerEventHandler) GetInternalCacheEntry(_ interface{}) interface{} {
+	return nil
 }
 
 // GetResourceFromInformerCache returns the latest state of the object, given an object key and its type.
@@ -930,11 +932,6 @@ func (h *defaultNetworkControllerEventHandler) GetResourceFromInformerCache(key 
 // RecordAddEvent records the add event on this given object.
 func (h *defaultNetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
 	switch h.objType {
-	case factory.PodType:
-		pod := obj.(*corev1.Pod)
-		klog.V(5).Infof("Recording add event on pod %s/%s", pod.Namespace, pod.Name)
-		h.oc.podRecorder.AddPod(pod.UID)
-		recorders.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording add event on network policy %s/%s", np.Namespace, np.Name)
@@ -945,10 +942,6 @@ func (h *defaultNetworkControllerEventHandler) RecordAddEvent(obj interface{}) {
 // RecordUpdateEvent records the update event on this given object.
 func (h *defaultNetworkControllerEventHandler) RecordUpdateEvent(obj interface{}) {
 	switch h.objType {
-	case factory.PodType:
-		pod := obj.(*corev1.Pod)
-		klog.V(5).Infof("Recording update event on pod %s/%s", pod.Namespace, pod.Name)
-		recorders.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording update event on network policy %s/%s", np.Namespace, np.Name)
@@ -959,11 +952,6 @@ func (h *defaultNetworkControllerEventHandler) RecordUpdateEvent(obj interface{}
 // RecordDeleteEvent records the delete event on this given object.
 func (h *defaultNetworkControllerEventHandler) RecordDeleteEvent(obj interface{}) {
 	switch h.objType {
-	case factory.PodType:
-		pod := obj.(*corev1.Pod)
-		klog.V(5).Infof("Recording delete event on pod %s/%s", pod.Namespace, pod.Name)
-		h.oc.podRecorder.CleanPod(pod.UID)
-		recorders.GetConfigDurationRecorder().Start("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording delete event on network policy %s/%s", np.Namespace, np.Name)
@@ -974,10 +962,6 @@ func (h *defaultNetworkControllerEventHandler) RecordDeleteEvent(obj interface{}
 // RecordSuccessEvent records the success event on this given object.
 func (h *defaultNetworkControllerEventHandler) RecordSuccessEvent(obj interface{}) {
 	switch h.objType {
-	case factory.PodType:
-		pod := obj.(*corev1.Pod)
-		klog.V(5).Infof("Recording success event on pod %s/%s", pod.Namespace, pod.Name)
-		recorders.GetConfigDurationRecorder().End("pod", pod.Namespace, pod.Name)
 	case factory.PolicyType:
 		np := obj.(*knet.NetworkPolicy)
 		klog.V(5).Infof("Recording success event on network policy %s/%s", np.Namespace, np.Name)
@@ -985,15 +969,7 @@ func (h *defaultNetworkControllerEventHandler) RecordSuccessEvent(obj interface{
 	}
 }
 
-// RecordErrorEvent records an error event on the given object.
-// Only used for pods now.
-func (h *defaultNetworkControllerEventHandler) RecordErrorEvent(obj interface{}, reason string, err error) {
-	switch h.objType {
-	case factory.PodType:
-		pod := obj.(*corev1.Pod)
-		klog.V(5).Infof("Recording error event on pod %s/%s", pod.Namespace, pod.Name)
-		h.oc.recordPodEvent(reason, err, pod)
-	}
+func (h *defaultNetworkControllerEventHandler) RecordErrorEvent(_ interface{}, _ string, _ error) {
 }
 
 // IsResourceScheduled returns true if the given object has been scheduled.
@@ -1007,13 +983,6 @@ func (h *defaultNetworkControllerEventHandler) IsResourceScheduled(obj interface
 // Given an object to add and a boolean specifying if the function was executed from iterateRetryResources
 func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, fromRetryLoop bool) error {
 	switch h.objType {
-	case factory.PodType:
-		pod, ok := obj.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("could not cast %T object to *corev1.Pod", obj)
-		}
-		return h.oc.ensurePod(nil, pod, true)
-
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
 		return h.oc.eIPC.reconcileEgressIP(nil, eIP)
@@ -1089,14 +1058,8 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 // type and returns the error, if any, yielded during the object update.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
+func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
-	case factory.PodType:
-		oldPod := oldObj.(*corev1.Pod)
-		newPod := newObj.(*corev1.Pod)
-
-		return h.oc.ensurePod(oldPod, newPod, inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod))
-
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
 		newEIP := newObj.(*egressipv1.EgressIP)
@@ -1165,17 +1128,8 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods and network policies.
-func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, cachedObj interface{}) error {
+func (h *defaultNetworkControllerEventHandler) DeleteResource(obj, _ interface{}) error {
 	switch h.objType {
-	case factory.PodType:
-		var portInfo *lpInfo
-		pod := obj.(*corev1.Pod)
-
-		if cachedObj != nil {
-			portInfo = cachedObj.(*lpInfo)
-		}
-		return h.oc.removePod(pod, portInfo)
-
 	case factory.EgressIPType:
 		eIP := obj.(*egressipv1.EgressIP)
 		return h.oc.eIPC.reconcileEgressIP(eIP, nil)
@@ -1221,9 +1175,6 @@ func (h *defaultNetworkControllerEventHandler) SyncFunc(objs []interface{}) erro
 		syncFunc = h.syncFunc
 	} else {
 		switch h.objType {
-		case factory.PodType:
-			syncFunc = h.oc.syncPods
-
 		case factory.PolicyType:
 			syncFunc = h.oc.syncNetworkPolicies
 

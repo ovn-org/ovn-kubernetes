@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -15,6 +16,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apitypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
@@ -22,12 +25,14 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
+	ipallocator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -44,7 +49,258 @@ func (bsnc *BaseUserDefinedNetworkController) getPortInfoForUserDefinedNetwork(p
 		return nil
 	}
 	portInfoMap, _ := bsnc.logicalPortCache.getAll(pod)
-	return portInfoMap
+	if len(portInfoMap) == 0 {
+		return nil
+	}
+
+	networkPortInfoMap := map[string]*lpInfo{}
+	for nadKey, portInfo := range portInfoMap {
+		if portInfo != nil && portInfo.appliedNetworkName == bsnc.GetNetworkName() {
+			networkPortInfoMap[nadKey] = portInfo
+		}
+	}
+	if len(networkPortInfoMap) == 0 {
+		return nil
+	}
+	return networkPortInfoMap
+}
+
+// getReplacementPod returns the current pod when the namespaced name has been
+// reused by a different pod incarnation.
+func (bsnc *BaseUserDefinedNetworkController) getReplacementPod(pod *corev1.Pod) (*corev1.Pod, error) {
+	if bsnc.watchFactory == nil {
+		return nil, nil
+	}
+	currentPod, err := bsnc.watchFactory.GetPod(pod.Namespace, pod.Name)
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current pod %s/%s while deleting UID %s: %w",
+			pod.Namespace, pod.Name, pod.UID, err)
+	}
+	if currentPod.UID == pod.UID {
+		return nil, nil
+	}
+	return currentPod, nil
+}
+
+// reconcileNetworkPolicyPortGroupsAfterDelete removes membership owned by
+// the deleted identity, or reconciles the latest same-name replacement. Policy
+// membership is keyed by namespace/name rather than UID, so blindly deleting
+// it would race a replacement while blindly preserving it would leak the old
+// pod's membership for ineligible replacements such as HostNetwork or pending
+// pods.
+func (bsnc *BaseUserDefinedNetworkController) reconcileNetworkPolicyPortGroupsAfterDelete(pod, replacementPod *corev1.Pod) error {
+	if replacementPod != nil {
+		return bsnc.reconcileNetworkPolicyPortGroupsWithPortCheck(replacementPod, false)
+	}
+	return bsnc.deletePodNetworkPolicyMembership(pod)
+}
+
+// getCurrentPodLogicalPortNADs returns the NADs for which the current pod
+// should have an LSP in this zone. If the current pod's attachment cannot be
+// evaluated, desiredKnown is false and legacy ports must be preserved. The
+// returned error lets callers retain a delete retry when that ambiguity
+// prevents an applied legacy port from being classified.
+func (bsnc *BaseUserDefinedNetworkController) getCurrentPodLogicalPortNADs(pod *corev1.Pod) (nadKeys sets.Set[string], desiredKnown bool, err error) {
+	nadKeys = sets.New[string]()
+	if pod == nil || util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) || !bsnc.hasPodLogicalPort(pod) {
+		return nadKeys, true, nil
+	}
+
+	on, networkMap, err := bsnc.podNetworkSelectionForUserDefinedNetwork(pod)
+	if err != nil {
+		resolutionErr := fmt.Errorf("cannot determine current network attachments for replacement pod %s/%s UID %s on network %s: %w",
+			pod.Namespace, pod.Name, pod.UID, bsnc.GetNetworkName(), err)
+		klog.Warningf("%v; preserving legacy OVN ports", resolutionErr)
+		return nadKeys, false, resolutionErr
+	}
+	if !on {
+		return nadKeys, true, nil
+	}
+	for nadKey := range networkMap {
+		nadKeys.Insert(nadKey)
+	}
+	return nadKeys, true, nil
+}
+
+// getPodPortInfoFromNBDB discovers applied pod ports owned by this network. A
+// replacement pod makes the namespaced name ambiguous, so iface-id-ver and the
+// current pod's desired NADs are used to separate stale ports from current
+// ports. The returned port map contains only ports that are safe to delete.
+// A failure to query NBDB returns nil maps. Errors resolving individual rows
+// are aggregated with the non-nil partial maps so callers can clean up safely
+// classified ports while retaining a retry for the unresolved rows.
+func (bsnc *BaseUserDefinedNetworkController) getPodPortInfoFromNBDB(
+	pod, replacementPod *corev1.Pod,
+	replacementNADKeys sets.Set[string],
+	replacementNADKeysKnown bool,
+) (map[string]*lpInfo, map[string]*nbdb.LogicalSwitchPort, error) {
+
+	podNameSuffix := "_" + util.GetLogicalPortName(pod.Namespace, pod.Name)
+	lsps, err := libovsdbops.FindLogicalSwitchPortsByNamespaceAndNetwork(bsnc.nbClient, pod.Namespace, bsnc.GetNetworkName())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to find OVN pod ports for pod %s/%s on network %s: %w", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+	}
+
+	portInfoMap := map[string]*lpInfo{}
+	protectedLSPs := map[string]*nbdb.LogicalSwitchPort{}
+	var rowErrors []error
+	for _, lsp := range lsps {
+		if lsp.ExternalIDs["pod"] != "true" || !strings.HasSuffix(lsp.Name, podNameSuffix) {
+			continue
+		}
+		nadKey := lsp.ExternalIDs[types.NADExternalID]
+		if nadKey == "" {
+			rowErrors = append(rowErrors, fmt.Errorf("OVN pod port %s for pod %s/%s on network %s has no NAD external ID",
+				lsp.Name, pod.Namespace, pod.Name, bsnc.GetNetworkName()))
+			continue
+		}
+		expectedPortName := bsnc.GetLogicalPortName(pod, nadKey)
+		if lsp.Name != expectedPortName {
+			rowErrors = append(rowErrors, fmt.Errorf("OVN pod port %s for pod %s/%s on network %s does not match expected port name %s for NAD %s",
+				lsp.Name, pod.Namespace, pod.Name, bsnc.GetNetworkName(), expectedPortName, nadKey))
+			continue
+		}
+
+		ifaceIDVer := lsp.Options["iface-id-ver"]
+		if replacementPod != nil {
+			currentPodUID := string(replacementPod.UID)
+			currentOwned := currentPodUID != "" && ifaceIDVer == currentPodUID
+			legacyDesired := ifaceIDVer == "" &&
+				(!replacementNADKeysKnown || replacementNADKeys.Has(nadKey))
+			if currentOwned || legacyDesired {
+				if staleLSP, found := portInfoMap[nadKey]; found {
+					delete(portInfoMap, nadKey)
+					rowErrors = append(rowErrors, fmt.Errorf("found both replacement-owned OVN pod port %s and stale OVN pod port %s for pod %s/%s on NAD %s",
+						lsp.Name, staleLSP.name, pod.Namespace, pod.Name, nadKey))
+				}
+				if protectedLSP, found := protectedLSPs[nadKey]; found {
+					rowErrors = append(rowErrors, fmt.Errorf("found multiple replacement-owned OVN pod ports %s and %s for pod %s/%s on NAD %s",
+						protectedLSP.Name, lsp.Name, pod.Namespace, pod.Name, nadKey))
+					continue
+				}
+				protectedLSPs[nadKey] = lsp
+				continue
+			}
+		}
+
+		portUUID, switchName, err := bsnc.lookupPortUUIDAndSwitchName(lsp.Name)
+		if err != nil {
+			rowErrors = append(rowErrors, fmt.Errorf("failed to locate logical switch for OVN pod port %s: %w", lsp.Name, err))
+			continue
+		}
+		if portUUID != lsp.UUID {
+			rowErrors = append(rowErrors, fmt.Errorf("OVN pod port %s changed UUID while discovering applied state: found %s, expected %s", lsp.Name, portUUID, lsp.UUID))
+			continue
+		}
+
+		mac, ips, err := bsnc.getPortAddresses(switchName, lsp)
+		if err != nil {
+			rowErrors = append(rowErrors, fmt.Errorf("failed to restore applied addresses from OVN pod port %s: %w", lsp.Name, err))
+			continue
+		}
+		if bsnc.allocatesPodAnnotation() && bsnc.doesNetworkRequireIPAM() {
+			_, rawIPs, err := libovsdbutil.ExtractPortAddresses(lsp)
+			if err != nil {
+				rowErrors = append(rowErrors, fmt.Errorf("failed to extract addresses from OVN pod port %s: %w", lsp.Name, err))
+				continue
+			}
+			if len(ips) != len(rawIPs) {
+				// Node or zone cleanup can remove the logical-switch allocator before
+				// this stale LSP is discovered. Keep every durable address for the
+				// collision check and delete recovery; IPAM lookup/release is keyed by
+				// the IP itself, so a host mask is a safe fallback when the original
+				// subnet is no longer available.
+				maskedIPs := make(map[string]*net.IPNet, len(ips))
+				for _, ipNet := range ips {
+					if ipNet != nil {
+						maskedIPs[ipNet.IP.String()] = ipNet
+					}
+				}
+				restoredIPs := make([]*net.IPNet, 0, len(rawIPs))
+				for _, rawIP := range rawIPs {
+					if ipNet, ok := maskedIPs[rawIP.String()]; ok {
+						restoredIPs = append(restoredIPs, ipNet)
+						continue
+					}
+					restoredIPs = append(restoredIPs, &net.IPNet{
+						IP:   append(net.IP(nil), rawIP...),
+						Mask: util.GetIPFullMask(rawIP),
+					})
+				}
+				klog.Warningf("Restored %d of %d subnet masks for stale OVN pod port %s; using host masks for missing allocator state",
+					len(ips), len(rawIPs), lsp.Name)
+				ips = restoredIPs
+			}
+		}
+		if protectedLSP, found := protectedLSPs[nadKey]; found {
+			rowErrors = append(rowErrors, fmt.Errorf("found both stale OVN pod port %s and replacement-owned OVN pod port %s for pod %s/%s on NAD %s",
+				lsp.Name, protectedLSP.Name, pod.Namespace, pod.Name, nadKey))
+			continue
+		}
+		if _, found := portInfoMap[nadKey]; found {
+			rowErrors = append(rowErrors, fmt.Errorf("found multiple OVN pod ports for pod %s/%s on NAD %s", pod.Namespace, pod.Name, nadKey))
+			continue
+		}
+		portInfoMap[nadKey] = &lpInfo{
+			name:               lsp.Name,
+			uuid:               lsp.UUID,
+			appliedNetworkName: bsnc.GetNetworkName(),
+			logicalSwitch:      switchName,
+			ips:                ips,
+			mac:                mac,
+		}
+	}
+
+	return portInfoMap, protectedLSPs, utilerrors.Join(rowErrors...)
+}
+
+// releaseStaleCachedPodIPsForReplacement releases IPAM state retained only by
+// an old delete snapshot while preserving every address used by the protected
+// replacement LSP. It never mutates or deletes replacement-owned OVN/cache
+// state. LSM ownership checks also preserve addresses acquired by any other pod.
+func (bsnc *BaseUserDefinedNetworkController) releaseStaleCachedPodIPsForReplacement(
+	deletedPod *corev1.Pod,
+	nadKey string,
+	stalePortInfo *lpInfo,
+	protectedLSP *nbdb.LogicalSwitchPort,
+) error {
+	if !bsnc.allocatesPodAnnotation() || !bsnc.doesNetworkRequireIPAM() || stalePortInfo == nil || len(stalePortInfo.ips) == 0 {
+		return nil
+	}
+
+	_, protectedIPs, err := libovsdbutil.ExtractPortAddresses(protectedLSP)
+	if err != nil {
+		return fmt.Errorf("failed to extract addresses from replacement-owned OVN pod port %s: %w", protectedLSP.Name, err)
+	}
+	if len(protectedIPs) == 0 {
+		return fmt.Errorf("replacement-owned OVN pod port %s has no addresses while stale IPAM state remains for NAD %s",
+			protectedLSP.Name, nadKey)
+	}
+
+	protectedIPStrings := sets.New[string]()
+	for _, protectedIP := range protectedIPs {
+		protectedIPStrings.Insert(protectedIP.String())
+	}
+	staleIPs := make([]*net.IPNet, 0, len(stalePortInfo.ips))
+	for _, staleIP := range stalePortInfo.ips {
+		if staleIP == nil || protectedIPStrings.Has(staleIP.IP.String()) {
+			continue
+		}
+		staleIPs = append(staleIPs, staleIP)
+	}
+	if len(staleIPs) == 0 {
+		return nil
+	}
+
+	staleIPInfo := cloneLPInfo(stalePortInfo)
+	staleIPInfo.ips = staleIPs
+	if err := bsnc.releasePodIPs(deletedPod, nadKey, staleIPInfo); err != nil {
+		return fmt.Errorf("failed to release stale replacement IPs for NAD %s: %w", nadKey, err)
+	}
+	return nil
 }
 
 // GetInternalCacheEntryForUserDefinedNetwork returns the internal cache entry for this object, given an object and its type.
@@ -53,23 +309,316 @@ func (bsnc *BaseUserDefinedNetworkController) GetInternalCacheEntryForUserDefine
 	switch objType {
 	case factory.PodType:
 		pod := obj.(*corev1.Pod)
-		return bsnc.getPortInfoForUserDefinedNetwork(pod)
+		return bsnc.GetPodState(pod)
 	default:
 		return nil
 	}
+}
+
+func (bsnc *BaseUserDefinedNetworkController) SyncPods(pods []*corev1.Pod) (sets.Set[apitypes.UID], error) {
+	if err := bsnc.syncPodsForUserDefinedNetwork(podsToInterfaces(pods)); err != nil {
+		return nil, err
+	}
+	// Discover durable state once per network, rather than making every unrelated
+	// bootstrap pod run the full-table fallback in getPodPortInfoFromNBDB.
+	ports, err := libovsdbops.FindLogicalSwitchPortWithPredicate(bsnc.nbClient, func(lsp *nbdb.LogicalSwitchPort) bool {
+		return lsp.ExternalIDs["pod"] == "true" && lsp.ExternalIDs[types.NetworkExternalID] == bsnc.GetNetworkName()
+	})
+	if err != nil {
+		return nil, err
+	}
+	portNamespaces := sets.New[string]()
+	for _, port := range ports {
+		portNamespaces.Insert(port.ExternalIDs["namespace"])
+	}
+	emptyPods := sets.New[apitypes.UID]()
+	for _, pod := range pods {
+		// Namespace-level evidence is deliberately conservative: it also covers
+		// legacy ports without a UID or NAD, without parsing logical port names.
+		if portNamespaces.Has(pod.Namespace) || portNamespaces.Has("") ||
+			len(bsnc.podPortsForReconcile(pod, nil)) != 0 {
+			continue
+		}
+		annotations, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+		if err != nil {
+			continue
+		}
+		hasAttachment := false
+		for nadKey := range annotations {
+			if nadKey == types.DefaultNetworkName {
+				continue
+			}
+			networkName := bsnc.networkManager.GetNetworkNameForNADKey(nadKey)
+			if networkName == "" || networkName == bsnc.GetNetworkName() {
+				// An annotation can reserve IPAM during sync even without an LSP.
+				hasAttachment = true
+				break
+			}
+		}
+		if !hasAttachment && pod.UID != "" {
+			emptyPods.Insert(pod.UID)
+		}
+	}
+	return emptyPods, nil
+}
+
+func (bsnc *BaseUserDefinedNetworkController) GetPodState(pod *corev1.Pod) interface{} {
+	// Avoid returning a typed-nil map as applied state.
+	if portInfoMap := bsnc.getPortInfoForUserDefinedNetwork(pod); portInfoMap != nil {
+		return portInfoMap
+	}
+	return nil
+}
+
+func (bsnc *BaseUserDefinedNetworkController) PodExpectedOnNetwork(pod *corev1.Pod) (bool, error) {
+	if util.PodCompleted(pod) {
+		return false, nil
+	}
+	on, _, err := bsnc.podNetworkSelectionForUserDefinedNetwork(pod)
+	if err != nil {
+		var configErr *podNetworkConfigError
+		if errors.As(err, &configErr) {
+			return true, nil
+		}
+		return false, err
+	}
+	return on, nil
+}
+
+// podPortsForReconcile includes side effects of failed attempts without
+// advancing the shared controller's last successfully applied pod snapshot.
+func (bsnc *BaseUserDefinedNetworkController) podPortsForReconcile(pod *corev1.Pod, applied map[string]*lpInfo) map[string]*lpInfo {
+	ports := make(map[string]*lpInfo)
+	merge := func(entries map[string]*lpInfo, requireUID bool) {
+		for nadKey, info := range entries {
+			if info == nil || info.appliedNetworkName != bsnc.GetNetworkName() {
+				continue
+			}
+			// Expiring cache entries may be left by an already successful
+			// cleanup. Only a retained applied/pending snapshot can prove that
+			// their teardown still needs retrying.
+			if requireUID && !info.expires.IsZero() {
+				continue
+			}
+			if (requireUID || info.podUID != "") && info.podUID != pod.UID {
+				continue
+			}
+			ports[nadKey] = cloneLPInfo(info)
+		}
+	}
+	merge(applied, false)
+	if pending, ok := bsnc.incompletePodPorts.Load(podReconcileKey(pod)); ok {
+		merge(pending.(map[string]*lpInfo), false)
+	}
+	// The live cache is name-keyed and may belong to a replacement. Only
+	// merge entries written for this UID, even when no replacement is visible
+	// in the informer yet. Current cache entries supersede older snapshots.
+	cached, _ := bsnc.logicalPortCache.getAll(pod)
+	merge(cached, true)
+	return ports
+}
+
+func (bsnc *BaseUserDefinedNetworkController) finishPodReconcile(pod *corev1.Pod) {
+	bsnc.incompletePodPorts.Delete(podReconcileKey(pod))
+}
+
+func (bsnc *BaseUserDefinedNetworkController) rememberIncompletePodPorts(pod *corev1.Pod, applied map[string]*lpInfo) {
+	ports := bsnc.podPortsForReconcile(pod, applied)
+	if len(ports) != 0 {
+		bsnc.incompletePodPorts.Store(podReconcileKey(pod), ports)
+	}
+}
+
+func (bsnc *BaseUserDefinedNetworkController) ReconcilePod(oldPod, newPod *corev1.Pod, lastState interface{}) (state interface{}, reconcileErr error) {
+	var appliedPortInfoMap map[string]*lpInfo
+	if lastState != nil {
+		var ok bool
+		appliedPortInfoMap, ok = lastState.(map[string]*lpInfo)
+		if !ok {
+			return nil, fmt.Errorf("pod reconcile for network %s expected map[string]*lpInfo cache state but got %T", bsnc.GetNetworkName(), lastState)
+		}
+	}
+	pod := newPod
+	if pod == nil {
+		pod = oldPod
+	}
+	if pod == nil {
+		return nil, fmt.Errorf("pod reconcile for network %s is missing pod", bsnc.GetNetworkName())
+	}
+	appliedPortInfoMap = bsnc.podPortsForReconcile(pod, appliedPortInfoMap)
+	defer func() {
+		if reconcileErr != nil {
+			bsnc.rememberIncompletePodPorts(pod, appliedPortInfoMap)
+		}
+	}()
+	if newPod == nil {
+		if oldPod == nil {
+			return nil, fmt.Errorf("pod delete reconcile for network %s is missing pod", bsnc.GetNetworkName())
+		}
+		if err := bsnc.removePodForUserDefinedNetwork(oldPod, appliedPortInfoMap); err != nil {
+			return nil, err
+		}
+		bsnc.finishPodReconcile(oldPod)
+		return nil, nil
+	}
+
+	desiredPortNADs, err := bsnc.desiredPodPortNADs(newPod)
+	if err != nil {
+		var configErr *podNetworkConfigError
+		if !errors.As(err, &configErr) {
+			return nil, err
+		}
+		// Preserve applied state while the desired attachment is ambiguous.
+		// The ensure path records this as a pod configuration event without
+		// turning it into an endlessly retried controller error.
+		eventReason := "ErrorAddingResource"
+		if oldPod != nil {
+			eventReason = "ErrorUpdatingResource"
+		}
+		if err := bsnc.ensurePodForUserDefinedNetwork(newPod, true, eventReason); err != nil {
+			return nil, err
+		}
+		return appliedPortInfoMap, nil
+	}
+
+	appliedPod := oldPod
+	if appliedPod == nil {
+		appliedPod = newPod
+	}
+	if err := bsnc.removeStalePodPortsForUserDefinedNetwork(appliedPod, appliedPortInfoMap, desiredPortNADs); err != nil {
+		return nil, err
+	}
+
+	// Until the first successful reconcile, keep retrying the add-style path
+	// even if a failed attempt partially populated local caches.
+	addPort := oldPod == nil || bsnc.shouldEnsurePodForUserDefinedNetwork(newPod)
+	eventReason := "ErrorAddingResource"
+	if oldPod != nil {
+		eventReason = "ErrorUpdatingResource"
+	}
+	err = bsnc.ensurePodForUserDefinedNetwork(newPod, addPort, eventReason)
+	if err == nil {
+		err = bsnc.reconcileNetworkPolicyPortGroups(newPod)
+	}
+	if err != nil {
+		if addPort {
+			bsnc.logicalPortCache.markPodForReconcile(newPod, bsnc.GetNetworkName())
+		}
+		return nil, err
+	}
+	bsnc.finishPodReconcile(newPod)
+	return bsnc.getDesiredPortInfoForUserDefinedNetwork(newPod, desiredPortNADs), nil
+}
+
+// desiredPodPortNADs returns the desired LSP keys in this zone. Network
+// relevance is intentionally resolved first: when attachment state is
+// malformed, applied ports must be preserved rather than mistaken for stale
+// state. A relevant remote or no-host-subnet pod has an empty desired LSP set
+// but still proceeds through the ensure path for policy and KubeVirt state.
+func (bsnc *BaseUserDefinedNetworkController) desiredPodPortNADs(pod *corev1.Pod) (sets.Set[string], error) {
+	desiredPortNADs := sets.New[string]()
+	on, networkMap, err := bsnc.podNetworkSelectionForUserDefinedNetwork(pod)
+	if err != nil || !on {
+		return desiredPortNADs, err
+	}
+	if !bsnc.hasPodLogicalPort(pod) || !bsnc.podExpectedInLogicalCache(pod) {
+		return desiredPortNADs, nil
+	}
+	for nadKey := range networkMap {
+		desiredPortNADs.Insert(nadKey)
+	}
+	return desiredPortNADs, nil
+}
+
+func (bsnc *BaseUserDefinedNetworkController) getDesiredPortInfoForUserDefinedNetwork(
+	pod *corev1.Pod, desiredPortNADs sets.Set[string],
+) map[string]*lpInfo {
+	portInfoMap := map[string]*lpInfo{}
+	for nadKey := range desiredPortNADs {
+		portInfo, err := bsnc.logicalPortCache.get(pod, nadKey)
+		if err != nil || portInfo == nil || !portInfo.expires.IsZero() || portInfo.appliedNetworkName != bsnc.GetNetworkName() {
+			continue
+		}
+		portInfoMap[nadKey] = portInfo
+	}
+	if len(portInfoMap) == 0 {
+		return nil
+	}
+	return portInfoMap
+}
+
+// removeStalePodPortsForUserDefinedNetwork retires only applied NADs that are
+// absent from the current desired LSP set. Whole-pod policy and replacement
+// cleanup remains in removePodForUserDefinedNetwork; updates reconcile policy
+// membership once the desired ports have been ensured.
+func (bsnc *BaseUserDefinedNetworkController) removeStalePodPortsForUserDefinedNetwork(
+	pod *corev1.Pod,
+	appliedPortInfoMap map[string]*lpInfo,
+	desiredPortNADs sets.Set[string],
+) error {
+	if len(appliedPortInfoMap) == 0 {
+		return nil
+	}
+
+	podNetworks, annotationErr := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+	if annotationErr != nil {
+		// Applied port state is sufficient for teardown. Keep malformed immutable
+		// state from blocking convergence when a usable snapshot exists.
+		klog.Errorf("Failed to unmarshal applied pod annotation for %s/%s on network %s while removing stale ports: %v",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), annotationErr)
+	}
+
+	var errs []error
+	for _, nadKey := range sets.List(sets.KeySet(appliedPortInfoMap).Difference(desiredPortNADs)) {
+		portInfo := appliedPortInfoMap[nadKey]
+		if portInfo != nil && portInfo.appliedNetworkName != bsnc.GetNetworkName() {
+			continue
+		}
+
+		if kubevirt.IsPodAllowedForMigration(pod, bsnc.GetNetInfo()) {
+			var mac string
+			var ips []string
+			if podAnnotation, ok := podNetworks[nadKey]; ok {
+				mac = podAnnotation.MAC
+				ips = podAnnotation.IPs
+			} else if portInfo != nil {
+				if len(portInfo.mac) > 0 {
+					mac = portInfo.mac.String()
+				}
+				ips = util.IPNetsToStringSlice(portInfo.ips)
+			}
+			if err := bsnc.enableSourceLSPFailedLiveMigration(pod, nadKey, mac, ips); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+
+		bsnc.logicalPortCache.remove(pod, nadKey)
+		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfo, nadKey)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to delete stale logical port of pod %s/%s for NAD key %s: %w",
+				pod.Namespace, pod.Name, nadKey, err))
+			continue
+		}
+		if !bsnc.allocatesPodAnnotation() {
+			continue
+		}
+		if pInfo == nil || len(pInfo.ips) == 0 {
+			continue
+		}
+		if err := bsnc.releasePodIPs(pod, nadKey, pInfo); err != nil {
+			errs = append(errs, fmt.Errorf("failed to release stale pod IPs for %s/%s NAD key %s: %w",
+				pod.Namespace, pod.Name, nadKey, err))
+			continue
+		}
+	}
+	return utilerrors.Join(errs...)
 }
 
 // AddUserDefinedNetworkResourceCommon adds the specified object to the cluster according to its type and returns the error,
 // if any, yielded during object creation. This function is called for User Defined Networks only.
 func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommon(objType reflect.Type, obj interface{}) error {
 	switch objType {
-	case factory.PodType:
-		pod, ok := obj.(*corev1.Pod)
-		if !ok {
-			return fmt.Errorf("could not cast %T object to *knet.Pod", obj)
-		}
-		return bsnc.ensurePodForUserDefinedNetwork(pod, true)
-
 	case factory.NamespaceType:
 		ns, ok := obj.(*corev1.Namespace)
 		if !ok {
@@ -108,16 +657,8 @@ func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommo
 // called for User Defined Networks only.
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
-func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCommon(objType reflect.Type, oldObj, newObj interface{}, inRetryCache bool) error {
+func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCommon(objType reflect.Type, oldObj, newObj interface{}, _ bool) error {
 	switch objType {
-	case factory.PodType:
-		oldPod := oldObj.(*corev1.Pod)
-		newPod := newObj.(*corev1.Pod)
-
-		addPort := shouldAddPort(oldPod, newPod, inRetryCache) ||
-			bsnc.dhcpPodNetworkUpdated(oldPod, newPod)
-		return bsnc.ensurePodForUserDefinedNetwork(newPod, addPort)
-
 	case factory.NamespaceType:
 		oldNs, newNs := oldObj.(*corev1.Namespace), newObj.(*corev1.Namespace)
 		return bsnc.updateNamespaceForUserDefinedNetwork(oldNs, newNs)
@@ -169,17 +710,8 @@ func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCo
 // Given an object and optionally a cachedObj; cachedObj is the internal cache entry for this object,
 // used for now for pods.
 // This function is called for User Defined Networks only.
-func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCommon(objType reflect.Type, obj, cachedObj interface{}) error {
+func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCommon(objType reflect.Type, obj, _ interface{}) error {
 	switch objType {
-	case factory.PodType:
-		var portInfoMap map[string]*lpInfo
-		pod := obj.(*corev1.Pod)
-
-		if cachedObj != nil {
-			portInfoMap = cachedObj.(map[string]*lpInfo)
-		}
-		return bsnc.removePodForUserDefinedNetwork(pod, portInfoMap)
-
 	case factory.NamespaceType:
 		ns := obj.(*corev1.Namespace)
 		return bsnc.deleteNamespaceForUserDefinedNetwork(ns)
@@ -206,15 +738,130 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 	return nil
 }
 
-// ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
-// on failure; failure indicates the pod set up should be retried later.
-func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod *corev1.Pod, addPort bool) error {
-	// Try unscheduled pods later
-	if !util.PodScheduled(pod) {
-		return nil
+func (bsnc *BaseUserDefinedNetworkController) shouldEnsurePodForUserDefinedNetwork(pod *corev1.Pod) bool {
+	if !util.PodScheduled(pod) || !bsnc.podExpectedInLogicalCache(pod) {
+		return false
 	}
 
-	if util.PodWantsHostNetwork(pod) {
+	// Remote-zone pods only need forced transition cleanup.
+	if !bsnc.hasPodLogicalPort(pod) {
+		return false
+	}
+
+	nadKeys, err := bsnc.getPodNADKeys(pod)
+	if err != nil {
+		// Surface malformed attachment state through the ensure path.
+		return true
+	}
+	for _, nadKey := range nadKeys {
+		portInfo, err := bsnc.logicalPortCache.get(pod, nadKey)
+		// Ignore cache entries written by other network controllers.
+		if err != nil || !portInfo.expires.IsZero() || portInfo.needsReconcile || portInfo.appliedNetworkName != bsnc.GetNetworkName() {
+			return true
+		}
+		if bsnc.dhcpPodNetworkOutOfSync(pod, nadKey, portInfo) {
+			return true
+		}
+	}
+
+	if len(nadKeys) > 0 || !bsnc.IsPrimaryNetwork() {
+		return false
+	}
+
+	activeNetwork, err := bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
+	if err != nil {
+		return true
+	}
+	return activeNetwork != nil && activeNetwork.GetNetworkName() == bsnc.GetNetworkName()
+}
+
+// dhcpPodNetworkOutOfSync reports whether the current DHCP-owned pod
+// annotation differs from the state recorded when the logical port was last
+// programmed. This keeps DHCP updates level driven: retries make the same
+// decision from current desired and applied state without relying on an old
+// informer object.
+func (bsnc *BaseUserDefinedNetworkController) dhcpPodNetworkOutOfSync(pod *corev1.Pod, nadKey string, portInfo *lpInfo) bool {
+	if bsnc.IPAMType() != types.IPAMTypeDHCP {
+		return false
+	}
+	podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
+	if err != nil {
+		// A removed entry should not churn a live port. Any malformed entry is
+		// reprocessed so the ensure path surfaces the configuration error.
+		return !util.IsAnnotationNotSetError(err)
+	}
+	return !reflect.DeepEqual(podAnnotation.MAC, portInfo.mac) ||
+		!reflect.DeepEqual(podAnnotation.IPs, portInfo.ips)
+}
+
+type podNetworkConfigError struct {
+	err error
+}
+
+func (e *podNetworkConfigError) Error() string {
+	return e.err.Error()
+}
+
+func (e *podNetworkConfigError) Unwrap() error {
+	return e.err
+}
+
+func (bsnc *BaseUserDefinedNetworkController) podActiveNetworkForUserDefinedNetwork(pod *corev1.Pod) (bool, util.NetInfo, error) {
+	if pod == nil || util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) {
+		return false, nil, nil
+	}
+
+	var activeNetwork util.NetInfo
+	if bsnc.IsPrimaryNetwork() {
+		// check to see if the primary NAD is even applicable to our controller
+		foundNamespaceNAD, err := bsnc.networkManager.GetPrimaryNADForNamespace(pod.Namespace)
+		if err != nil {
+			return false, nil, fmt.Errorf("failed to get primary network namespace NAD: %w", err)
+		}
+		if foundNamespaceNAD == types.DefaultNetworkName {
+			return false, nil, nil
+		}
+		networkName := bsnc.networkManager.GetNetworkNameForNADKey(foundNamespaceNAD)
+		if networkName != "" && networkName != bsnc.GetNetworkName() {
+			return false, nil, nil
+		}
+		activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
+		if err != nil {
+			return false, nil, fmt.Errorf("failed to find active network for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+		if activeNetwork == nil {
+			// no active network, pod doesn't belong to our controller
+			return false, nil, nil
+		}
+	}
+
+	return true, activeNetwork, nil
+}
+
+func (bsnc *BaseUserDefinedNetworkController) podNetworkSelectionForUserDefinedNetwork(pod *corev1.Pod) (bool, map[string]*nadapi.NetworkSelectionElement, error) {
+	on, activeNetwork, err := bsnc.podActiveNetworkForUserDefinedNetwork(pod)
+	if !on || err != nil {
+		return on, nil, err
+	}
+
+	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(
+		pod,
+		bsnc.GetNetInfo(),
+		activeNetwork,
+		bsnc.networkManager.GetNetworkNameForNADKey,
+		bsnc.networkManager.GetPrimaryNADForNamespace,
+	)
+	if err != nil {
+		return false, nil, &podNetworkConfigError{err: err}
+	}
+
+	return on, networkMap, nil
+}
+
+// ensurePodForUserDefinedNetwork tries to set up the User Defined Network for
+// a pod. Errors are retried by the caller.
+func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod *corev1.Pod, addPort bool, eventReason string) error {
+	if !util.PodScheduled(pod) || util.PodWantsHostNetwork(pod) {
 		return nil
 	}
 
@@ -240,43 +887,17 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 		return err
 	}
 
-	var activeNetwork util.NetInfo
-	if bsnc.IsPrimaryNetwork() {
-		// check to see if the primary NAD is even applicable to our controller
-		foundNamespaceNAD, err := bsnc.networkManager.GetPrimaryNADForNamespace(pod.Namespace)
-		if err != nil {
-			return fmt.Errorf("failed to get primary network namespace NAD: %w", err)
-		}
-		if foundNamespaceNAD == types.DefaultNetworkName {
-			return nil
-		}
-		networkName := bsnc.networkManager.GetNetworkNameForNADKey(foundNamespaceNAD)
-		if networkName != "" && networkName != bsnc.GetNetworkName() {
-			return nil
-		}
-		activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
-		if err != nil {
-			return fmt.Errorf("failed to find active network for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-		}
-		if activeNetwork == nil {
-			// no active network, pod doesn't belong to our controller
-			return nil
-		}
-	}
-
-	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(
-		pod,
-		bsnc.GetNetInfo(),
-		activeNetwork,
-		bsnc.networkManager.GetNetworkNameForNADKey,
-		bsnc.networkManager.GetPrimaryNADForNamespace,
-	)
+	on, networkMap, err := bsnc.podNetworkSelectionForUserDefinedNetwork(pod)
 	if err != nil {
-		bsnc.recordPodErrorEvent(pod, err)
-		// configuration error, no need to retry, do not return error
-		klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
-			pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-		return nil
+		var configErr *podNetworkConfigError
+		if errors.As(err, &configErr) {
+			bsnc.recordPodErrorEventWithReason(pod, eventReason, configErr.err)
+			// configuration error, no need to retry, do not return error
+			klog.Errorf("Error getting network-attachment for pod %s/%s network %s: %v",
+				pod.Namespace, pod.Name, bsnc.GetNetworkName(), configErr.err)
+			return nil
+		}
+		return err
 	}
 
 	if !on {
@@ -407,7 +1028,7 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 	txOkCallBack()
 
 	if lsp != nil {
-		_ = bsnc.logicalPortCache.add(pod, switchName, nadKey, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+		_ = bsnc.logicalPortCache.add(pod, switchName, nadKey, bsnc.GetNetworkName(), lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 		if bsnc.onLogicalPortCacheAdd != nil {
 			bsnc.onLogicalPortCacheAdd(pod, nadKey)
 		}
@@ -431,70 +1052,224 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 // removePodForUserDefinedNetwork tried to tear down a pod. It returns nil on success and error on failure;
 // failure indicates the pod tear down should be retried later.
 func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod *corev1.Pod, portInfoMap map[string]*lpInfo) error {
+	replacementPod, err := bsnc.getReplacementPod(pod)
+	if err != nil {
+		return err
+	}
+	// A successful snapshot may omit ports created by a later failed update.
+	// Include partial state while excluding the replacement's live cache.
+	portInfoMap = bsnc.podPortsForReconcile(pod, portInfoMap)
 	if util.PodWantsHostNetwork(pod) || !util.PodScheduled(pod) {
+		if err := bsnc.reconcileNetworkPolicyPortGroupsAfterDelete(pod, replacementPod); err != nil {
+			return fmt.Errorf("failed to reconcile network policy membership while deleting ineligible pod %s/%s network %s: %w",
+				pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+		}
 		return nil
 	}
 
 	podDesc := pod.Namespace + "/" + pod.Name
+	var errs []error
 
-	// for a specific NAD belongs to this network, Pod's logical port might already be created half-way
-	// without its lpInfo cache being created; need to deleted resources created for that NAD as well.
-	// So, first get all nadKeys from pod annotation, but handle NADs belong to this network only.
-	podNetworks, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
-	if err != nil {
-		return err
+	// Delete uses annotation state plus applied cache state.
+	podNetworks, annotationErr := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+	if annotationErr != nil {
+		klog.Errorf("Failed to unmarshal pod annotation for deleted pod %s on network %s: %v",
+			podDesc, bsnc.GetNetworkName(), annotationErr)
 	}
 
 	if portInfoMap == nil {
 		portInfoMap = map[string]*lpInfo{}
 	}
+	// Delete retries receive an immutable applied-state snapshot. Keep it
+	// separate because replacement handling makes NBDB authoritative for rows
+	// that still exist, while cache-only orphan state must still be expired and
+	// run through IPAM cleanup.
+	cachedPortInfoMap := make(map[string]*lpInfo, len(portInfoMap))
+	for nadKey, portInfo := range portInfoMap {
+		cachedPortInfoMap[nadKey] = portInfo
+	}
+
+	annotationNADKeys := sets.New[string]()
+	for nadKey := range podNetworks {
+		networkName := bsnc.networkManager.GetNetworkNameForNADKey(nadKey)
+		if networkName == bsnc.GetNetworkName() {
+			annotationNADKeys.Insert(nadKey)
+		}
+	}
+
+	nadKeys := sets.New[string]()
+	if replacementPod != nil {
+		// The annotation and applied cache are keyed by namespaced name and may
+		// both describe the replacement. Only NBDB state with stale ownership is
+		// safe to use for teardown in this case.
+		replacementNADKeys, replacementNADKeysKnown, replacementNADResolutionErr := bsnc.getCurrentPodLogicalPortNADs(replacementPod)
+		discoveredPortInfo, protectedLSPs, discoveryErr := bsnc.getPodPortInfoFromNBDB(
+			pod, replacementPod, replacementNADKeys, replacementNADKeysKnown)
+		if discoveryErr != nil {
+			if discoveredPortInfo == nil || protectedLSPs == nil {
+				// The NBDB query itself failed, so there is no trustworthy partial
+				// result from which cleanup can proceed.
+				return discoveryErr
+			}
+			errs = append(errs, discoveryErr)
+		}
+		if replacementNADResolutionErr != nil {
+			for _, protectedLSP := range protectedLSPs {
+				if protectedLSP.Options["iface-id-ver"] == "" {
+					// This legacy row cannot be assigned safely to either pod until
+					// the replacement's desired NADs can be evaluated. Preserve it,
+					// but retain the old pod's delete retry so it can be classified
+					// and removed if it proves stale.
+					errs = append(errs, replacementNADResolutionErr)
+					break
+				}
+			}
+		}
+		portInfoMap = discoveredPortInfo
+		for nadKey, cachedPortInfo := range cachedPortInfoMap {
+			if cachedPortInfo == nil || cachedPortInfo.appliedNetworkName != bsnc.GetNetworkName() {
+				continue
+			}
+			if protectedLSP, protected := protectedLSPs[nadKey]; protected {
+				if err := bsnc.releaseStaleCachedPodIPsForReplacement(pod, nadKey, cachedPortInfo, protectedLSP); err != nil {
+					errs = append(errs, err)
+				}
+				continue
+			}
+			if _, foundInNBDB := portInfoMap[nadKey]; foundInNBDB {
+				// Durable NBDB state wins over a potentially stale cache snapshot.
+				continue
+			}
+			if discoveryErr != nil {
+				// A malformed row may be the durable state for this cache key.
+				// Without a complete discovery result, absence from both partial
+				// maps does not prove this cache-only state is stale.
+				continue
+			}
+			// No LSP remains for this cached applied state. Process it through the
+			// normal idempotent delete path so the cache is expired and IPAM state
+			// is released only after the replacement collision check.
+			portInfoMap[nadKey] = cachedPortInfo
+		}
+		for nadKey := range portInfoMap {
+			nadKeys.Insert(nadKey)
+		}
+		for nadKey := range protectedLSPs {
+			klog.Infof("Preserving OVN pod port for replacement pod %s/%s UID %s on NAD %s",
+				replacementPod.Namespace, replacementPod.Name, replacementPod.UID, nadKey)
+		}
+	} else {
+		// A valid annotation for this controller is authoritative and keeps the
+		// common delete path free of an NBDB scan. A cache snapshot is still
+		// merged below, but cannot prove it contains every applied NAD.
+		nadKeys.Insert(annotationNADKeys.UnsortedList()...)
+		for nadKey := range portInfoMap {
+			nadKeys.Insert(nadKey)
+		}
+		// A cache snapshot cannot prove completeness. If this controller has no
+		// usable NAD in the immutable annotation (missing, malformed, empty, or
+		// detached), merge durable NBDB state even when part of the pod is cached.
+		if annotationNADKeys.Len() == 0 {
+			discoveredPortInfo, _, discoveryErr := bsnc.getPodPortInfoFromNBDB(pod, nil, nil, true)
+			if discoveryErr != nil && discoveredPortInfo == nil {
+				if annotationErr != nil {
+					return utilerrors.Join(
+						fmt.Errorf("failed to parse pod network annotation for deleted pod %s on network %s: %w", podDesc, bsnc.GetNetworkName(), annotationErr),
+						discoveryErr,
+					)
+				}
+				return discoveryErr
+			}
+			if discoveryErr != nil {
+				if annotationErr != nil {
+					errs = append(errs, fmt.Errorf("failed to parse pod network annotation for deleted pod %s on network %s: %w",
+						podDesc, bsnc.GetNetworkName(), annotationErr))
+				}
+				errs = append(errs, discoveryErr)
+			}
+			for nadKey, portInfo := range discoveredPortInfo {
+				if cachedPortInfo, found := portInfoMap[nadKey]; found && cachedPortInfo != nil && cachedPortInfo.uuid != portInfo.uuid {
+					klog.Warningf("Cached OVN pod port UUID %s differs from durable NBDB UUID %s for pod %s NAD %s; using NBDB state",
+						cachedPortInfo.uuid, portInfo.uuid, podDesc, nadKey)
+				}
+				portInfoMap[nadKey] = portInfo
+				nadKeys.Insert(nadKey)
+			}
+		}
+	}
+
+	cleanupNetworkPolicyMembership := func() error {
+		if err := bsnc.reconcileNetworkPolicyPortGroupsAfterDelete(pod, replacementPod); err != nil {
+			return fmt.Errorf("failed to delete network policy membership for pod %s/%s network %s: %w", pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
+		}
+		return nil
+	}
+
+	removePortInfoFromCache := func(nadKey string, deletedPortInfo *lpInfo) {
+		if replacementPod == nil {
+			bsnc.logicalPortCache.remove(pod, nadKey)
+			return
+		}
+		// Do not remove name-keyed cache state that has already been replaced.
+		// Pod events for one namespaced name share a retry lock, so comparing the
+		// UUID before removal is sufficient to protect a converged replacement.
+		if deletedPortInfo == nil {
+			return
+		}
+		currentPortInfo, err := bsnc.logicalPortCache.get(replacementPod, nadKey)
+		if err == nil && currentPortInfo.uuid == deletedPortInfo.uuid {
+			bsnc.logicalPortCache.remove(replacementPod, nadKey)
+		}
+	}
 
 	var alreadyProcessed bool
-	for nadKey, podAnnotation := range podNetworks {
-		networkName := bsnc.networkManager.GetNetworkNameForNADKey(nadKey)
-		portInfo := portInfoMap[nadKey]
-		if networkName == "" && portInfo != nil {
-			// The NAD may have been deleted before the Pod delete event is
-			// processed. In that case use the cached switch to determine which
-			// controller owns the port. The port cache is shared by all network
-			// controllers, so the presence of a cached entry alone is not enough.
-			var expectedSwitchName string
-			expectedSwitchName, err = bsnc.getExpectedSwitchName(pod)
-			if err != nil {
-				return fmt.Errorf("failed to determine expected switch for pod %s and NAD %s: %w", podDesc, nadKey, err)
-			}
-			if portInfo.logicalSwitch == expectedSwitchName {
-				networkName = bsnc.GetNetworkName()
-			}
-		}
-		if networkName != bsnc.GetNetworkName() {
-			continue
-		}
-
+	for _, nadKey := range sets.List(nadKeys) {
 		// pod has a network managed by this controller
 		klog.Infof("Deleting pod: %s for network %s, NAD key: %s", podDesc, bsnc.GetNetworkName(), nadKey)
 
-		// handle remote pod clean up but only do this one time
-		if !bsnc.hasPodLogicalPort(pod) && !alreadyProcessed {
+		// Handle remote pod cleanup only once. Concrete cached or NBDB-applied
+		// state may outlive a zone transition; when present, continue through the
+		// normal idempotent teardown instead of taking the remote-zone shortcut.
+		if !bsnc.hasPodLogicalPort(pod) && !alreadyProcessed && len(portInfoMap) == 0 {
 			// except for localnet networks, continue the delete flow in case a node just
 			// became remote where we might still need to cleanup. On L3 networks
 			// the node switch is removed so there is no need to do this.
 			if bsnc.TopologyType() != types.LocalnetTopology {
-				return nil
+				// Clear applied state so recreated pods do not look configured.
+				for _, cachedNADKey := range sets.List(nadKeys) {
+					removePortInfoFromCache(cachedNADKey, portInfoMap[cachedNADKey])
+				}
+				if err := cleanupNetworkPolicyMembership(); err != nil {
+					errs = append(errs, err)
+				}
+				return utilerrors.Join(errs...)
 			}
 			alreadyProcessed = true
 		}
 
 		if kubevirt.IsPodAllowedForMigration(pod, bsnc.GetNetInfo()) {
-			if err = bsnc.enableSourceLSPFailedLiveMigration(pod, nadKey, podAnnotation.MAC, podAnnotation.IPs); err != nil {
-				return err
+			var mac string
+			var ips []string
+			if podAnnotation, ok := podNetworks[nadKey]; ok {
+				mac = podAnnotation.MAC
+				ips = podAnnotation.IPs
+			} else if portInfo := portInfoMap[nadKey]; portInfo != nil {
+				if len(portInfo.mac) > 0 {
+					mac = portInfo.mac.String()
+				}
+				ips = util.IPNetsToStringSlice(portInfo.ips)
+			}
+			if err = bsnc.enableSourceLSPFailedLiveMigration(pod, nadKey, mac, ips); err != nil {
+				errs = append(errs, err)
+				continue
 			}
 		}
-		bsnc.logicalPortCache.remove(pod, nadKey)
-		var pInfo *lpInfo
-		pInfo, err = bsnc.deletePodLogicalPort(pod, portInfo, nadKey)
+		removePortInfoFromCache(nadKey, portInfoMap[nadKey])
+		// LSM ownership checks protect replacement allocations when IPs are released.
+		pInfo, err := bsnc.deletePodLogicalPort(pod, portInfoMap[nadKey], nadKey)
 		if err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 
 		// do not release IP address if this controller does not handle IP allocation
@@ -511,10 +1286,15 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 		klog.Infof("Attempting to release IPs for pod: %s/%s, ips: %s network %s", pod.Namespace, pod.Name,
 			util.JoinIPNetIPs(pInfo.ips, " "), bsnc.GetNetworkName())
 		if err = bsnc.releasePodIPs(pod, nadKey, pInfo); err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 	}
-	return nil
+	// Always clean recorded membership, even when per-NAD teardown failed.
+	if err := cleanupNetworkPolicyMembership(); err != nil {
+		errs = append(errs, err)
+	}
+	return utilerrors.Join(errs...)
 }
 
 func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
@@ -524,7 +1304,10 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 	}
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
-	expectedLogicalPorts := make(map[string]bool)
+	expectedLogicalPorts, err := bsnc.restoreAppliedPodIPs(orderedPods)
+	if err != nil {
+		return err
+	}
 	for _, pod := range orderedPods {
 		var activeNetwork util.NetInfo
 		var err error
@@ -605,6 +1388,65 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 	}
 
 	return bsnc.deleteStaleLogicalSwitchPorts(expectedLogicalPorts)
+}
+
+// restoreAppliedPodIPs reserves durable attachments before considering desired
+// annotations, which can still contain addresses released by a live detach.
+func (bsnc *BaseUserDefinedNetworkController) restoreAppliedPodIPs(pods []*corev1.Pod) (map[string]bool, error) {
+	expectedPorts := make(map[string]bool)
+	if !bsnc.allocatesPodAnnotation() || !bsnc.doesNetworkRequireIPAM() {
+		return expectedPorts, nil
+	}
+	for _, pod := range pods {
+		if !bsnc.isPodScheduledOnLocalNode(pod) || util.PodWantsHostNetwork(pod) {
+			continue
+		}
+		annotations, err := util.UnmarshalPodAnnotationAllNetworks(pod.Annotations)
+		if err != nil {
+			continue
+		}
+		ports := map[string]*lpInfo{}
+		for nadKey := range annotations {
+			if bsnc.networkManager.GetNetworkNameForNADKey(nadKey) != bsnc.GetNetworkName() {
+				continue
+			}
+			lsp, err := libovsdbops.GetLogicalSwitchPort(bsnc.nbClient, &nbdb.LogicalSwitchPort{Name: bsnc.GetLogicalPortName(pod, nadKey)})
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if uid := lsp.Options["iface-id-ver"]; uid != "" && uid != string(pod.UID) {
+				continue
+			}
+			_, switchName, err := bsnc.lookupPortUUIDAndSwitchName(lsp.Name)
+			if err != nil {
+				return nil, err
+			}
+			mac, ips, err := bsnc.getPortAddresses(switchName, lsp)
+			if err != nil {
+				return nil, err
+			}
+			if len(ips) == 0 {
+				continue
+			}
+			if err := bsnc.lsManager.AllocateIPs(switchName, bsnc.podIPOwner(pod, nadKey), ips); err != nil &&
+				(!ipallocator.IsErrAllocated(err) || errors.Is(err, ipallocator.ErrAllocatedByOther)) {
+				return nil, fmt.Errorf("failed to restore IP ownership for pod port %s: %w", lsp.Name, err)
+			}
+			expectedPorts[lsp.Name] = true
+			ports[nadKey] = &lpInfo{
+				name: lsp.Name, uuid: lsp.UUID, podUID: pod.UID,
+				appliedNetworkName: bsnc.GetNetworkName(), logicalSwitch: switchName,
+				mac: mac, ips: ips, needsReconcile: true,
+			}
+		}
+		// Detached ports must remain available for per-pod teardown, even when
+		// the first live reconcile only selects another NAD on this network.
+		bsnc.rememberIncompletePodPorts(pod, ports)
+	}
+	return expectedPorts, nil
 }
 
 // AddNamespaceForUserDefinedNetwork creates corresponding addressset in ovn db for User Defined Network
@@ -1065,71 +1907,6 @@ func (bsnc *BaseUserDefinedNetworkController) enableSourceLSPFailedLiveMigration
 // node where the pod was scheduled
 func (bsnc *BaseUserDefinedNetworkController) hasPodLogicalPort(pod *corev1.Pod) bool {
 	return pod != nil && (bsnc.isPodScheduledOnLocalNode(pod) || bsnc.isLayer2WithInterconnectTransport())
-}
-
-func shouldAddPort(oldPod, newPod *corev1.Pod, inRetryCache bool) bool {
-	return inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod)
-}
-
-// dhcpPodNetworkUpdated returns true when this network learns IPs from an
-// external DHCP server and this network's entries in the pod-networks
-// annotation were added or updated. ovnkube-node patches the DHCP-learned IP
-// into the annotation during CNI ADD after the port was first created, and
-// may patch it again with a different lease if the sandbox is recreated
-// before the pod reaches Running. So the port must be reprocessed to pick up
-// the IP.
-//
-// DHCP IPAM is localnet-secondary only, so the consumers of the
-// changed IP are exactly the features supported on such networks: the LSP
-// itself (addresses/port security) handled here, plus MultiNetworkPolicy and
-// NetworkQoS, which re-evaluate the pod's addresses from their own pod
-// UPDATE handlers.
-//
-// The annotation is a single blob shared by every network the pod attaches
-// to, and DHCP pods are multi-homed by construction (localnet is
-// secondary-only), so a whole-string comparison would turn every other
-// network's annotation write (at least one per network during pod bring-up)
-// into a spurious full addLogicalPort pass with a real NBDB transaction.
-// Compare only the entries belonging to this network, resolved the same way
-// removePodForUserDefinedNetwork does.
-//
-// A removed entry deliberately does NOT trigger: nothing legitimately removes
-// a DHCP entry from a live pod, and reprocessing the port without its
-// annotation would only churn (the CNI is the annotation's single writer).
-func (bsnc *BaseUserDefinedNetworkController) dhcpPodNetworkUpdated(oldPod, newPod *corev1.Pod) bool {
-	if bsnc.IPAMType() != types.IPAMTypeDHCP || oldPod == nil || newPod == nil {
-		return false
-	}
-	if oldPod.Annotations[types.OvnPodAnnotationName] == newPod.Annotations[types.OvnPodAnnotationName] {
-		return false
-	}
-	// If either annotation cannot be parsed, we cannot tell whether this
-	// network's entry changed, so return true and reprocess the port. A
-	// needless reprocess is harmless (addLogicalPort is idempotent), but
-	// skipping a real DHCP IP update would leave the port without its
-	// address forever, as no later event retries it.
-	oldNetworks, err := util.UnmarshalPodAnnotationAllNetworks(oldPod.Annotations)
-	if err != nil {
-		klog.Warningf("Failed to unmarshal pod-networks annotation of old pod %s/%s on network %s, reprocessing the port: %v",
-			oldPod.Namespace, oldPod.Name, bsnc.GetNetworkName(), err)
-		return true
-	}
-	newNetworks, err := util.UnmarshalPodAnnotationAllNetworks(newPod.Annotations)
-	if err != nil {
-		klog.Warningf("Failed to unmarshal pod-networks annotation of pod %s/%s on network %s, reprocessing the port: %v",
-			newPod.Namespace, newPod.Name, bsnc.GetNetworkName(), err)
-		return true
-	}
-	for nadKey, newEntry := range newNetworks {
-		if bsnc.networkManager.GetNetworkNameForNADKey(nadKey) != bsnc.GetNetworkName() {
-			continue
-		}
-		oldEntry, existed := oldNetworks[nadKey]
-		if !existed || !reflect.DeepEqual(oldEntry, newEntry) {
-			return true
-		}
-	}
-	return false
 }
 
 func nodesToInterfaces(nodes []*corev1.Node) []interface{} {

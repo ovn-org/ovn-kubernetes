@@ -370,7 +370,7 @@ func udnEgressIPFakeNetworkManager(f *udnEgressIPNBFixture, dncFinishedWithoutRe
 			if dncFinishedWithoutRemovingLRP != nil {
 				return nil
 			}
-			f.cm.portCache.Add(f.pod, f.mutableNetInfo.GetNetworkScopedSwitchName(f.nodeName), f.nadKey, "lsp-uuid", f.hwAddr, []*net.IPNet{f.podIPNet})
+			f.cm.portCache.Add(f.pod, f.mutableNetInfo.GetNetworkScopedSwitchName(f.nodeName), f.nadKey, f.mutableNetInfo.GetNetworkName(), "lsp-uuid", f.hwAddr, []*net.IPNet{f.podIPNet})
 			f.cm.eIPController.EnqueueNetwork(f.mutableNetInfo.GetNetworkName())
 			Expect(f.cm.eIPController.SyncNetworkReady(f.mutableNetInfo.GetNetworkName())).To(Succeed())
 			return nil
@@ -577,7 +577,7 @@ var _ = Describe("ControllerManager Start order", func() {
 
 		// Simulate UDN Start enqueue/sync after DNC (async UDN Start ordering).
 		fixture.cm.portCache.Add(fixture.pod, fixture.mutableNetInfo.GetNetworkScopedSwitchName(fixture.nodeName),
-			fixture.nadKey, "lsp-uuid", fixture.hwAddr, []*net.IPNet{fixture.podIPNet})
+			fixture.nadKey, fixture.mutableNetInfo.GetNetworkName(), "lsp-uuid", fixture.hwAddr, []*net.IPNet{fixture.podIPNet})
 		fixture.cm.eIPController.EnqueueNetwork(fixture.mutableNetInfo.GetNetworkName())
 		Expect(fixture.cm.eIPController.SyncNetworkReady(fixture.mutableNetInfo.GetNetworkName())).To(Succeed())
 

@@ -12,12 +12,15 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	listersv1 "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
@@ -26,6 +29,7 @@ import (
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -34,6 +38,7 @@ var (
 	virtLauncherPodLabel = map[string]string{
 		kubevirtv1.AppLabel: "virt-launcher",
 	}
+	liveMigrationVMLocks = syncmap.NewSyncMap[struct{}]()
 )
 
 // IsPodLiveMigratable returns true if the pod should use KubeVirt live migration features.
@@ -56,13 +61,40 @@ func findVMRelatedPods(client *factory.WatchFactory, pod *corev1.Pod) ([]*corev1
 	for _, vmPod := range vmPods {
 		// The purpose of this function is to return the "other" pods related
 		// to a VM.
-		if vmPod.UID == pod.UID {
+		if samePod(vmPod, pod) {
 			continue
 		}
 		filteredOutVMPods = append(filteredOutVMPods, vmPod)
 	}
 
 	return filteredOutVMPods, nil
+}
+
+// RelatedPodKeys returns queue keys for pods owned by the same virtual machine.
+func RelatedPodKeys(podLister listersv1.PodLister, pod *corev1.Pod) ([]string, error) {
+	if !IsPodLiveMigratable(pod) {
+		return nil, nil
+	}
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return nil, err
+	}
+	if vmDescription == nil {
+		return nil, nil
+	}
+	vmPods, err := vmDescription.OwnedPods(podLister)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(vmPods))
+	for _, vmPod := range vmPods {
+		key, err := cache.MetaNamespaceKeyFunc(vmPod)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
 }
 
 // findPodAnnotation returns the OVN pod annotation from any other pod annotated with the same VM as pod.
@@ -83,7 +115,35 @@ func findPodAnnotation(client *factory.WatchFactory, pod *corev1.Pod, nadKey str
 			return podAnnotation, nil
 		}
 	}
-	return nil, fmt.Errorf("missing virtual machine pod annotation at stale pods for %s/%s", pod.Namespace, pod.Name)
+
+	// Related VM pods exist but none carries the annotation for this NAD yet.
+	// Only the oldest VM pod may allocate fresh addresses; newer pods (e.g.
+	// live-migration targets) fail so the reconcile is retried until they can
+	// inherit the VM's persistent addresses from an older pod.
+	for _, vmPod := range vmPods {
+		if util.PodCompleted(vmPod) {
+			// A completed pod never becomes annotated for this NAD.
+			continue
+		}
+		if vmPod.CreationTimestamp.Time.Before(pod.CreationTimestamp.Time) {
+			return nil, missingVMAnnotationError(pod)
+		}
+	}
+	return nil, nil
+}
+
+func samePod(a, b *corev1.Pod) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.UID != "" && b.UID != "" {
+		return a.UID == b.UID
+	}
+	return a.Namespace == b.Namespace && a.Name == b.Name
+}
+
+func missingVMAnnotationError(pod *corev1.Pod) error {
+	return fmt.Errorf("missing virtual machine pod annotation at stale pods for %s/%s", pod.Namespace, pod.Name)
 }
 
 // EnsurePodAnnotationForVM extracts OVN pod annotations from the source VM pod
@@ -95,6 +155,16 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 		return nil, nil
 	}
 
+	var podAnnotation *util.PodAnnotation
+	err := withLiveMigrationVMLock(pod, func() error {
+		var err error
+		podAnnotation, err = ensurePodAnnotationForVMLocked(watchFactory, kube, pod, nadKey)
+		return err
+	})
+	return podAnnotation, err
+}
+
+func ensurePodAnnotationForVMLocked(watchFactory *factory.WatchFactory, kube *kube.KubeOVN, pod *corev1.Pod, nadKey string) (*util.PodAnnotation, error) {
 	if podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey); err == nil {
 		return podAnnotation, nil
 	}
@@ -130,10 +200,31 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 	return podAnnotation, nil
 }
 
+func withLiveMigrationVMLock(pod *corev1.Pod, fn func() error) error {
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return err
+	}
+	if vmDescription == nil {
+		return fn()
+	}
+
+	key := vmDescription.Key().String()
+	liveMigrationVMLocks.LockKey(key)
+	defer liveMigrationVMLocks.UnlockKey(key)
+	return fn()
+}
+
 // AllVMPodsAreCompleted returns true if all VM pods are completed.
 func AllVMPodsAreCompleted(podLister listersv1.PodLister, pod *corev1.Pod) (bool, error) {
 	if !util.PodCompleted(pod) {
-		return false, nil
+		currentPod, err := podLister.Pods(pod.Namespace).Get(pod.Name)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		if err == nil && currentPod.UID == pod.UID && !util.PodCompleted(currentPod) {
+			return false, nil
+		}
 	}
 
 	vmDescription, err := NewVMDescriptionFromPod(pod)
@@ -316,13 +407,109 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 		return nil
 	}
 
-	if err := DeleteDHCPOptions(nbClient, pod); err != nil {
+	return withLiveMigrationVMLock(pod, func() error {
+		if err := DeleteDHCPOptions(nbClient, pod); err != nil {
+			return err
+		}
+		if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// IsFailedLiveMigrationTarget returns true when pod is a terminal target pod
+// of a failed live migration. A newer migration attempt does not change the
+// identity of an older failed target, so classify the supplied pod relative to
+// its older, still-running VM siblings instead of only considering the newest
+// pod returned by DiscoverLiveMigrationStatus.
+func IsFailedLiveMigrationTarget(podLister listersv1.PodLister, pod *corev1.Pod) (bool, error) {
+	if !IsPodLiveMigratable(pod) || !util.PodCompleted(pod) {
+		return false, nil
+	}
+
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return false, err
+	}
+	if vmDescription == nil {
+		return false, nil
+	}
+	vmPods, err := vmDescription.OwnedPods(podLister)
+	if err != nil {
+		return false, err
+	}
+
+	for _, vmPod := range vmPods {
+		if samePod(vmPod, pod) {
+			continue
+		}
+		if !util.PodCompleted(vmPod) && vmPod.CreationTimestamp.Time.Before(pod.CreationTimestamp.Time) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CleanUpFailedLiveMigrationTargetPod removes local OVN state created for a
+// failed live-migration target pod while the source pod remains active. Only
+// routes pointing at the target pod's node are removed: routes are matched by
+// VM, so the VM's active routes pointing at the source pod's node must be
+// left alone.
+func CleanUpFailedLiveMigrationTargetPod(nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod, zone string) error {
+	failedTarget, err := IsFailedLiveMigrationTarget(watchFactory.PodCoreInformer().Lister(), pod)
+	if err != nil {
+		return fmt.Errorf("failed checking failed live migration target pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	if !failedTarget {
+		return nil
+	}
+
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
 		return err
 	}
-	if err := DeleteRoutingForMigratedPod(nbClient, pod); err != nil {
-		return err
+	if vmDescription == nil {
+		return nil
 	}
-	return nil
+
+	routeMatchesTargetNode := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.OutputPort != nil && *item.OutputPort == ovntypes.RouterToSwitchPrefix+pod.Spec.NodeName
+	}
+	if zone == OvnRemoteZone {
+		// Remote-zone routes carry no output port; they point at the target
+		// node via its transit switch port address as nexthop.
+		node, err := watchFactory.GetNode(pod.Spec.NodeName)
+		if err != nil {
+			// Node is gone: its routes are cleaned up by node deletion and
+			// virtual machine sync.
+			return nil
+		}
+		transitSwitchPortAddrs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+		if err != nil {
+			return err
+		}
+		targetNexthops := map[string]struct{}{}
+		for _, addr := range transitSwitchPortAddrs {
+			targetNexthops[addr.IP.String()] = struct{}{}
+		}
+		routeMatchesTargetNode = func(item *nbdb.LogicalRouterStaticRoute) bool {
+			_, ok := targetNexthops[item.Nexthop]
+			return ok
+		}
+	}
+
+	return withLiveMigrationVMLock(pod, func() error {
+		routePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.ExternalIDs[OvnZoneExternalIDKey] == zone &&
+				externalIDsContainsVM(item.ExternalIDs, ptr.To(vmDescription.Key())) &&
+				routeMatchesTargetNode(item)
+		}
+		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, routePredicate); err != nil {
+			return fmt.Errorf("failed deleting failed live migration target pod routes for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+		return nil
+	})
 }
 
 // SyncVirtualMachines deletes stale OVN resources for missing VMs or VMs in the wrong zone.
@@ -525,7 +712,10 @@ func DiscoverLiveMigrationStatus(podLister listersv1.PodLister, pod *corev1.Pod)
 	if err != nil {
 		return nil, err
 	}
+	return discoverLiveMigrationStatus(vmPods)
+}
 
+func discoverLiveMigrationStatus(vmPods []*corev1.Pod) (*LiveMigrationStatus, error) {
 	// no migration
 	if len(vmPods) < 2 {
 		// If the only remaining pod has the migration target ready

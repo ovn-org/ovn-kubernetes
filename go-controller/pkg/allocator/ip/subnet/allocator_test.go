@@ -82,6 +82,63 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 			}
 		})
 
+		ginkgo.It("preserves allocations when updating with identical subnet config", func() {
+			subnets := []string{
+				"10.1.1.0/24",
+			}
+
+			err := allocator.AddOrUpdateSubnet(SubnetConfig{
+				Name:    subnetName,
+				Subnets: ovntest.MustParseIPNets(subnets...),
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ips, err := allocator.AllocateNextIPs(subnetName, "test-owner")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(ips).To(gomega.HaveLen(1))
+			gomega.Expect(ips[0].String()).To(gomega.Equal("10.1.1.1/24"))
+
+			err = allocator.AddOrUpdateSubnet(SubnetConfig{
+				Name:    subnetName,
+				Subnets: ovntest.MustParseIPNets(subnets...),
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ips, err = allocator.AllocateNextIPs(subnetName, "test-owner")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(ips).To(gomega.HaveLen(1))
+			gomega.Expect(ips[0].String()).To(gomega.Equal("10.1.1.2/24"))
+		})
+
+		ginkgo.It("rebuilds allocations when exclude config changes", func() {
+			subnets := []string{
+				"10.1.1.0/24",
+			}
+
+			err := allocator.AddOrUpdateSubnet(SubnetConfig{
+				Name:    subnetName,
+				Subnets: ovntest.MustParseIPNets(subnets...),
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ips, err := allocator.AllocateNextIPs(subnetName, "test-owner")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(ips).To(gomega.HaveLen(1))
+			gomega.Expect(ips[0].String()).To(gomega.Equal("10.1.1.1/24"))
+
+			err = allocator.AddOrUpdateSubnet(SubnetConfig{
+				Name:           subnetName,
+				Subnets:        ovntest.MustParseIPNets(subnets...),
+				ExcludeSubnets: ovntest.MustParseIPNets("10.1.1.0/29"),
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ips, err = allocator.AllocateNextIPs(subnetName, "test-owner")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(ips).To(gomega.HaveLen(1))
+			gomega.Expect(ips[0].String()).To(gomega.Equal("10.1.1.8/24"))
+		})
+
 		ginkgo.It("excludes subnets correctly", func() {
 			subnets := []string{
 				"10.1.1.0/24",
@@ -465,7 +522,10 @@ func TestIPOwnershipOnSubnetInitialization(t *testing.T) {
 		"vm-a": append(append([]*net.IPNet{}, ips...), ips...), // Migration pods share a reservation.
 		"vm-b": otherIPs,
 	}
-	for range 2 {
+	for _, nextIPs := range [][]*net.IPNet{
+		ovntest.MustParseIPNets("10.0.0.5/24", "fd00::5/64"),
+		ovntest.MustParseIPNets("10.0.0.6/24", "fd00::6/64"),
+	} {
 		g.Expect(allocator.AddOrUpdateSubnet(ownershipSubnetConfig(initial))).To(gomega.Succeed())
 		g.Expect(allocator.OwnsIPs("node", "vm-a", ips)).To(gomega.BeTrue())
 		g.Expect(allocator.OwnsIPs("node", "vm-b", otherIPs)).To(gomega.BeTrue())
@@ -474,7 +534,7 @@ func TestIPOwnershipOnSubnetInitialization(t *testing.T) {
 		g.Expect(allocator.ReleaseIPs("node", "other", ips)).To(gomega.Succeed())
 		allocated, err := allocator.AllocateNextIPs("node", "pod")
 		g.Expect(err).NotTo(gomega.HaveOccurred())
-		g.Expect(allocated).To(gomega.Equal(ovntest.MustParseIPNets("10.0.0.5/24", "fd00::5/64")))
+		g.Expect(allocated).To(gomega.Equal(nextIPs), "an unchanged initialization must preserve later allocations")
 	}
 	g.Expect(allocator.ReleaseIPs("node", "vm-a", ips)).To(gomega.Succeed())
 	g.Expect(allocator.AllocateIPs("node", "other", ips)).To(gomega.Succeed())

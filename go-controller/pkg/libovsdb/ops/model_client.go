@@ -16,6 +16,7 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
@@ -379,7 +380,7 @@ func (m *modelClient) create(opModel *operationModel) ([]ovsdb.Operation, error)
 }
 
 func (m *modelClient) update(lookUpModel interface{}, opModel *operationModel) (o []ovsdb.Operation, err error) {
-	o, err = m.client.Where(lookUpModel).Update(opModel.Model, opModel.OnModelUpdates...)
+	o, err = m.whereRow(lookUpModel).Update(opModel.Model, opModel.OnModelUpdates...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to update model, err: %w", err)
 	}
@@ -395,7 +396,7 @@ func (m *modelClient) mutate(lookUpModel interface{}, opModel *operationModel, m
 	if len(modelMutations) == 0 || err != nil {
 		return nil, err
 	}
-	o, err = m.client.Where(lookUpModel).Mutate(opModel.Model, modelMutations...)
+	o, err = m.whereRow(lookUpModel).Mutate(opModel.Model, modelMutations...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to mutate model, err: %w", err)
 	}
@@ -404,12 +405,21 @@ func (m *modelClient) mutate(lookUpModel interface{}, opModel *operationModel, m
 }
 
 func (m *modelClient) delete(lookUpModel interface{}) (o []ovsdb.Operation, err error) {
-	o, err = m.client.Where(lookUpModel).Delete()
+	o, err = m.whereRow(lookUpModel).Delete()
 	if err != nil {
 		return nil, fmt.Errorf("unable to delete model, err: %w", err)
 	}
 	klog.V(5).Infof("Delete operations generated as: %+v", o)
 	return o, nil
+}
+
+func (m *modelClient) whereRow(row interface{}) client.ConditionalAPI {
+	if port, ok := row.(*nbdb.LogicalSwitchPort); ok {
+		// A resolved port must not fall back to its non-unique namespace/network
+		// index if it disappears from the cache before operations are built.
+		return m.client.WhereAll(port, model.Condition{Field: &port.UUID, Function: ovsdb.ConditionEqual, Value: port.UUID})
+	}
+	return m.client.Where(row)
 }
 
 func (m *modelClient) Lookup(opModels ...operationModel) error {
@@ -471,8 +481,26 @@ func (m *modelClient) where(opModel *operationModel) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
-	var err error
-	if err = m.client.Where(copyModel).List(ctx, opModel.ExistingResult); err != nil {
+	if port, ok := copyModel.(*nbdb.LogicalSwitchPort); ok {
+		// Get considers only UUID/schema indexes. Where would also fall back to
+		// the non-unique namespace/network index when the requested port is absent.
+		if err := m.client.Get(ctx, port); err != nil {
+			return err
+		}
+		// Reuse Get's cache copy, preserving List's result types and capacity limit.
+		switch result := opModel.ExistingResult.(type) {
+		case *[]*nbdb.LogicalSwitchPort:
+			if cap(*result) == 0 || len(*result) < cap(*result) {
+				*result = append(*result, port)
+			}
+		case *[]nbdb.LogicalSwitchPort:
+			if cap(*result) == 0 || len(*result) < cap(*result) {
+				*result = append(*result, *port)
+			}
+		default:
+			return fmt.Errorf("expected logical switch port result slice, got %T", opModel.ExistingResult)
+		}
+	} else if err := m.whereRow(copyModel).List(ctx, opModel.ExistingResult); err != nil {
 		return err
 	}
 	if opModel.Model == nil || opModel.BulkOp {
@@ -480,12 +508,11 @@ func (m *modelClient) where(opModel *operationModel) error {
 	}
 	// for non-bulk op cases, copy (the one) uuid found to model provided.
 	// so that further user operations with the same model are indexed by UUID
-	err = onModels(opModel.ExistingResult, func(model interface{}) error {
+	return onModels(opModel.ExistingResult, func(model interface{}) error {
 		uuid := getUUID(model)
 		setUUID(opModel.Model, uuid)
 		return nil
 	})
-	return err
 }
 
 func (m *modelClient) whereCache(opModel *operationModel) error {

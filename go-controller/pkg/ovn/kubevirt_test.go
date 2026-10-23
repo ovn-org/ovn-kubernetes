@@ -818,6 +818,32 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 					// UpdateStatus avoids overwriting controller annotations
 					// (the fake client's UpdateStatus replaces the entire object).
 					if virtLauncherPodToCreate.updatePhase != nil {
+						// A level-driven reconciler may coalesce the add and status
+						// update. Wait until the running target has actually been
+						// applied so this test exercises cleanup of failed migration
+						// state rather than skipping the transient state entirely.
+						Eventually(func() error {
+							updatedPod, err := fakeOvn.controller.watchFactory.GetPod(podToCreate.Namespace, podToCreate.Name)
+							if err != nil {
+								return err
+							}
+							_, err = util.UnmarshalPodAnnotation(updatedPod.Annotations, ovntypes.DefaultNetworkName)
+							return err
+						}).
+							WithTimeout(time.Minute).
+							WithPolling(time.Second).
+							Should(Succeed(), "should apply the running migration target before completing it")
+						Eventually(func() (int, error) {
+							var dhcpOptions []nbdb.DHCPOptions
+							if err := fakeOvn.nbClient.List(context.TODO(), &dhcpOptions); err != nil {
+								return 0, err
+							}
+							return len(dhcpOptions), nil
+						}).
+							WithTimeout(time.Minute).
+							WithPolling(time.Second).
+							Should(Equal(2), "should configure DHCP before cleaning up the failed target")
+
 						patch := []byte(fmt.Sprintf(`{"status":{"phase":%q}}`, *virtLauncherPodToCreate.updatePhase))
 						_, err = fakeOvn.fakeClient.KubeClient.CoreV1().
 							Pods(t.namespace).
@@ -896,7 +922,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				}
 
 				for router, testpod := range map[*nbdb.LogicalRouter]testVirtLauncherPod{expectedGWRouter: t.testVirtLauncherPod, expectedMigrationTargetGWRouter: t.migrationTarget.testVirtLauncherPod} {
-					if testpod.nodeName == fakeOvn.controller.nodeName && router != nil && testpod.podName != "" {
+					if testpod.nodeName == fakeOvn.controller.nodeName && router != nil && testpod.podName != "" && !virtLauncherCompleted(testpod) {
 						natIDs, nats := composeNats(testpod)
 						router.Nat = append(router.Nat, natIDs...)
 						for _, nat := range nats {
@@ -1012,7 +1038,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				// it happen?
 				// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5627
 				expectedNATs := map[string][]*nbdb.NAT{}
-				if deleteFirst.nodeName == fakeOvn.controller.nodeName {
+				if deleteFirst.nodeName == fakeOvn.controller.nodeName && !virtLauncherCompleted(deleteFirst) {
 					_, nats := composeNats(deleteFirst)
 					expectedNATs[deleteFirstRouter.Name] = nats
 				}
@@ -1417,16 +1443,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						updatePhase:        phasePointer(corev1.PodSucceeded),
 					},
 				},
-				expectedDhcpv4: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv4,
-					dns:      dnsServiceIPv4,
-					hostname: vm1,
-				}},
-				expectedDhcpv6: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv6,
-					dns:      dnsServiceIPv6,
-					hostname: vm1,
-				}},
 				expectedStaticRoutes: []testStaticRoute{
 					{
 						prefix:  vmByName[vm1].addressIPv4,
@@ -1464,16 +1480,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 						updatePhase:        phasePointer(corev1.PodFailed),
 					},
 				},
-				expectedDhcpv4: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv4,
-					dns:      dnsServiceIPv4,
-					hostname: vm1,
-				}},
-				expectedDhcpv6: []testDHCPOptions{{
-					cidr:     nodeByName[node1].subnetIPv6,
-					dns:      dnsServiceIPv6,
-					hostname: vm1,
-				}},
 				expectedStaticRoutes: []testStaticRoute{
 					{
 						prefix:  vmByName[vm1].addressIPv4,

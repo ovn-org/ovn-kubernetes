@@ -1466,6 +1466,83 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+func TestLookupLogicalSwitchPort(t *testing.T) {
+	port := &nbdb.LogicalSwitchPort{
+		UUID:      "00000000-0000-0000-0000-000000000001",
+		Name:      "port",
+		Addresses: []string{"dynamic"},
+	}
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{
+		&nbdb.LogicalSwitch{UUID: "switch", Name: "switch", Ports: []string{port.UUID}}, port,
+	}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup.Cleanup)
+	m := newModelClient(nbClient)
+
+	for _, tc := range []struct {
+		name   string
+		result interface{}
+	}{
+		{name: "default result"},
+		{name: "pointers", result: new([]*nbdb.LogicalSwitchPort)},
+		{name: "values", result: new([]nbdb.LogicalSwitchPort)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := &nbdb.LogicalSwitchPort{Name: port.Name, Addresses: []string{"desired"}}
+			op := operationModel{Model: query, ExistingResult: tc.result, ErrNotFound: true}
+			if err := m.lookup(&op); err != nil {
+				t.Fatal(err)
+			}
+			if query.UUID != port.UUID || !reflect.DeepEqual(query.Addresses, []string{"desired"}) {
+				t.Fatalf("lookup must set the UUID without replacing desired fields: %+v", query)
+			}
+			if reflect.ValueOf(op.ExistingResult).Elem().Len() != 1 {
+				t.Fatalf("expected one port: %+v", op.ExistingResult)
+			}
+			if err := onModels(op.ExistingResult, func(found interface{}) error {
+				if !reflect.DeepEqual(found, port) {
+					return fmt.Errorf("expected cached port %+v, got %+v", port, found)
+				}
+				found.(*nbdb.LogicalSwitchPort).Addresses[0] = "changed"
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			cached := &nbdb.LogicalSwitchPort{Name: port.Name}
+			if err := nbClient.Get(t.Context(), cached); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(cached, port) {
+				t.Fatalf("modifying a lookup result changed the cache: %+v", cached)
+			}
+		})
+	}
+
+	// Like List, indexed lookup must not grow an already full result slice.
+	for _, result := range []interface{}{
+		&[]*nbdb.LogicalSwitchPort{{Name: "previous"}},
+		&[]nbdb.LogicalSwitchPort{{Name: "previous"}},
+	} {
+		query := &nbdb.LogicalSwitchPort{UUID: port.UUID}
+		if err := m.Lookup(operationModel{Model: query, ExistingResult: result, BulkOp: true}); err != nil {
+			t.Fatal(err)
+		}
+		if reflect.ValueOf(result).Elem().Len() != 1 {
+			t.Fatalf("lookup exceeded the result capacity: %+v", result)
+		}
+		if err := onModels(result, func(found interface{}) error {
+			if found.(*nbdb.LogicalSwitchPort).Name != "previous" {
+				return fmt.Errorf("lookup replaced an existing result: %+v", found)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestBuildMutationsFromFields(t *testing.T) {
 	invalidField := 5
 	mapField := map[string]string{

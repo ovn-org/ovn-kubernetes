@@ -32,6 +32,7 @@ import (
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
+	podcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/pod"
 	adminpolicybasedrouteapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedroutefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	egressfirewall "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -135,6 +136,7 @@ type FakeOVN struct {
 	addressSetManager *addresssetmanager.AddressSetManager
 	portCache         *PortCache
 	udnNodeController *nodecontroller.NodeController
+	udnPodController  *podcontroller.Controller
 
 	// information map of all UDN controllers
 	userDefinedNetworkControllers map[string]userDefinedNetworkControllerInfo
@@ -253,8 +255,14 @@ func (o *FakeOVN) shutdown() {
 	if o.udnNodeController != nil {
 		o.udnNodeController.Stop()
 	}
+	if o.udnPodController != nil {
+		o.udnPodController.Stop()
+	}
 	if o.controller != nil && o.controller.nodeReconciler != nil {
 		o.controller.nodeReconciler.Stop()
+	}
+	if o.controller != nil && o.controller.podReconciler != nil {
+		o.controller.podReconciler.Stop()
 	}
 	o.watcher.Shutdown()
 	close(o.stopChan)
@@ -345,6 +353,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	o.controller.multicastSupport = config.EnableMulticast
 	o.udnNodeController = o.controller.nodeReconciler
+	o.udnPodController = o.controller.podReconciler
 
 	setupCOPP := false
 	setupClusterController(o.controller, setupCOPP)
@@ -360,6 +369,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	err = o.udnNodeController.Start()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+	err = o.udnPodController.Start()
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	err = o.networkManager.Start()
@@ -497,7 +509,8 @@ func NewOvnController(
 	)
 
 	nodeReconciler := nodecontroller.NewNodeController(wf, networkManager, cnci.nodeName)
-	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, networkManager, nil, nil, eIPController, portCache, addressSetManager, nodeReconciler)
+	podReconciler := podcontroller.NewPodController(wf)
+	dnc, err := newDefaultNetworkControllerCommon(cnci, stopChan, wg, addressSetFactory, networkManager, nil, nil, eIPController, portCache, addressSetManager, nodeReconciler, podReconciler)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	return dnc, err
@@ -572,7 +585,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 		switch topoType {
 		case types.Layer3Topology:
 			l3Controller, err := NewLayer3UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
-				o.eIPController, o.portCache, o.addressSetManager, o.udnNodeController, o.controller.ServiceController())
+				o.eIPController, o.portCache, o.addressSetManager, o.udnNodeController, o.udnPodController, o.controller.ServiceController())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l3Controller.addressSetFactory = asf
@@ -581,7 +594,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 			o.fullL3UDNControllers[netName] = l3Controller
 		case types.Layer2Topology:
 			l2Controller, err := NewLayer2UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
-				o.portCache, o.eIPController, o.addressSetManager, o.udnNodeController, o.controller.ServiceController())
+				o.portCache, o.eIPController, o.addressSetManager, o.udnNodeController, o.udnPodController, o.controller.ServiceController())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l2Controller.addressSetFactory = asf
@@ -590,7 +603,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 			o.fullL2UDNControllers[netName] = l2Controller
 		case types.LocalnetTopology:
 			localnetController := NewLocalnetUserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), o.addressSetManager,
-				o.udnNodeController)
+				o.udnNodeController, o.udnPodController)
 			if o.asf != nil { // use fake asf only when enabled
 				localnetController.addressSetFactory = asf
 			}

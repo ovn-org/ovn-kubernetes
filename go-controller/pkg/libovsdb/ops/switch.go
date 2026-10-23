@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/model"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -28,6 +29,22 @@ func FindLogicalSwitchPortWithPredicate(nbClient libovsdbclient.Client, p switch
 	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
 	defer cancel()
 	err := nbClient.WhereCache(p).List(ctx, &found)
+	return found, err
+}
+
+// FindLogicalSwitchPortsByNamespaceAndNetwork looks up ports using their namespace
+// and network external IDs. The NB client indexes this pair to avoid a table scan.
+func FindLogicalSwitchPortsByNamespaceAndNetwork(nbClient libovsdbclient.Client, namespace, network string) ([]*nbdb.LogicalSwitchPort, error) {
+	port := &nbdb.LogicalSwitchPort{ExternalIDs: map[string]string{
+		"namespace":                namespace,
+		ovntypes.NetworkExternalID: network,
+	}}
+	found := []*nbdb.LogicalSwitchPort{}
+	ctx, cancel := context.WithTimeout(context.Background(), ovntypes.OVSDBTimeout)
+	defer cancel()
+	err := nbClient.WhereAll(port, model.Condition{
+		Field: &port.ExternalIDs, Function: ovsdb.ConditionIncludes, Value: port.ExternalIDs,
+	}).List(ctx, &found)
 	return found, err
 }
 

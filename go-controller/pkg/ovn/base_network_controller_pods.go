@@ -15,6 +15,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
@@ -324,6 +325,9 @@ func (bnc *BaseNetworkController) releasePodIPs(pod *corev1.Pod, nadKey string, 
 	return nil
 }
 
+func podReconcileKey(pod *corev1.Pod) string {
+	return pod.Namespace + "/" + pod.Name + "/" + string(pod.UID)
+}
 func (bnc *BaseNetworkController) waitForNodeLogicalSwitch(switchName string) (*nbdb.LogicalSwitch, error) {
 	// Wait for the node logical switch to be created by the ClusterController and be present
 	// in libovsdb's cache. The node switch will be created when the node's logical network infrastructure
@@ -368,6 +372,40 @@ func (bnc *BaseNetworkController) podExpectedInLogicalCache(pod *corev1.Pod) boo
 	return !util.PodWantsHostNetwork(pod) &&
 		!bnc.isNonHostSubnetSwitch(switchName) &&
 		!util.PodCompleted(pod)
+}
+
+func (bnc *BaseNetworkController) shouldEnsurePodLogicalPort(pod *corev1.Pod, nadKey string) bool {
+	if !util.PodScheduled(pod) || !bnc.podExpectedInLogicalCache(pod) {
+		return false
+	}
+	portInfo, err := bnc.logicalPortCache.get(pod, nadKey)
+	if err != nil || !portInfo.expires.IsZero() || portInfo.needsReconcile {
+		return true
+	}
+	podIPs, err := util.GetPodCIDRsWithFullMask(pod, bnc.GetNetInfo(), bnc.getNetworkNameForNADKeyFunc())
+	if err != nil || len(podIPs) == 0 {
+		return false
+	}
+	return !sameIPSet(portInfo.ips, podIPs)
+}
+
+func sameIPSet(a, b []*net.IPNet) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ips := sets.New[string]()
+	for _, ipNet := range a {
+		if ipNet == nil {
+			continue
+		}
+		ips.Insert(ipNet.IP.String())
+	}
+	for _, ipNet := range b {
+		if ipNet == nil || !ips.Has(ipNet.IP.String()) {
+			return false
+		}
+	}
+	return true
 }
 
 func (bnc *BaseNetworkController) getExpectedSwitchName(pod *corev1.Pod) (string, error) {
@@ -731,15 +769,42 @@ func (bnc *BaseNetworkController) isPodScheduledOnLocalNode(pod *corev1.Pod) boo
 
 // WatchPods starts the watching of the Pod resource and calls back the appropriate handler logic
 func (bnc *BaseNetworkController) WatchPods() error {
-	if bnc.podHandler != nil {
+	if bnc.podHandlerRegistered {
 		return nil
 	}
-
-	handler, err := bnc.retryPods.WatchResource()
-	if err == nil {
-		bnc.podHandler = handler
+	if bnc.podReconciler == nil {
+		return fmt.Errorf("shared pod reconciler is required for network %s", bnc.GetNetworkName())
 	}
-	return err
+	if bnc.podHandler == nil {
+		return fmt.Errorf("pod handler is required for network %s", bnc.GetNetworkName())
+	}
+	if err := bnc.podReconciler.Start(); err != nil {
+		return err
+	}
+	done, err := bnc.podReconciler.RegisterNetworkController(bnc.podHandler)
+	if err != nil {
+		return err
+	}
+	bnc.podHandlerRegistered = true
+	// Wait until every existing pod has been attempted at least once before
+	// starting dependent controllers. This is a bounded bootstrap barrier, not
+	// a guarantee that every pod was applied; failed pods remain on the retry
+	// queue like any other.
+	<-done
+	return nil
+}
+
+func podsToInterfaces(pods []*corev1.Pod) []interface{} {
+	objs := make([]interface{}, 0, len(pods))
+	for _, pod := range pods {
+		objs = append(objs, pod)
+	}
+	return objs
+}
+
+// RelatedPodKeys returns pod keys that should be requeued with this pod.
+func (bnc *BaseNetworkController) RelatedPodKeys(pod *corev1.Pod) ([]string, error) {
+	return kubevirt.RelatedPodKeys(bnc.watchFactory.PodCoreInformer().Lister(), pod)
 }
 
 func calculateStaticIPs(podDesc string, ips []string) ([]*net.IPNet, error) {
