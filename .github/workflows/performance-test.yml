@@ -437,7 +437,7 @@ jobs:
       run: |
         set -x
         pushd go-controller
-           make gofmt
+           make gofmt CONTAINER_RUNNABLE=1
            make verify-go-mod-vendor
            make verify-third-party-licenses
            make

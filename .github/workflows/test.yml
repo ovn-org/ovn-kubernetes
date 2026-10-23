@@ -259,7 +259,7 @@ jobs:
         set -x
         pushd go-controller
            # exit early if there are formatting, go mod / vendor, or license tree issues
-           make gofmt
+           make gofmt CONTAINER_RUNNABLE=1
            make verify-go-mod-vendor
            make verify-third-party-licenses
            make
