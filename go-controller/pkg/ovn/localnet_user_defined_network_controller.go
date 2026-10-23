@@ -12,6 +12,7 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -184,23 +185,24 @@ func NewLocalnetUserDefinedNetworkController(
 		BaseLayer2UserDefinedNetworkController{
 			BaseUserDefinedNetworkController: BaseUserDefinedNetworkController{
 				BaseNetworkController: BaseNetworkController{
-					CommonNetworkControllerInfo: *cnci,
-					controllerName:              getNetworkControllerName(netInfo.GetNetworkName()),
-					ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
-					lsManager:                   lsm.NewL2SwitchManager(),
-					logicalPortCache:            NewPortCache(stopChan),
-					namespaces:                  make(map[string]*namespaceInfo),
-					namespacesMutex:             sync.Mutex{},
-					addressSetFactory:           addressSetFactory,
-					networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
-					sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-					stopChan:                    stopChan,
-					wg:                          &sync.WaitGroup{},
-					cancelableCtx:               util.NewCancelableContext(),
-					networkManager:              networkManager,
-					addressSetManager:           addressSetManager,
-					nodeReconciler:              nodeReconciler,
-					nodeAnnotationCache:         nodeAnnotationCache,
+					CommonNetworkControllerInfo:  *cnci,
+					controllerName:               getNetworkControllerName(netInfo.GetNetworkName()),
+					ReconcilableNetInfo:          util.NewReconcilableNetInfo(netInfo),
+					lsManager:                    lsm.NewL2SwitchManager(),
+					logicalPortCache:             NewPortCache(stopChan),
+					namespaces:                   make(map[string]*namespaceInfo),
+					namespacesMutex:              sync.Mutex{},
+					addressSetFactory:            addressSetFactory,
+					networkPolicies:              syncmap.NewSyncMap[*networkPolicy](),
+					networkPolicyKeysByNamespace: syncmap.NewSyncMap[sets.Set[string]](),
+					sharedNetpolPortGroups:       syncmap.NewSyncMap[*defaultDenyPortGroups](),
+					stopChan:                     stopChan,
+					wg:                           &sync.WaitGroup{},
+					cancelableCtx:                util.NewCancelableContext(),
+					networkManager:               networkManager,
+					addressSetManager:            addressSetManager,
+					nodeReconciler:               nodeReconciler,
+					nodeAnnotationCache:          nodeAnnotationCache,
 				},
 			},
 		},

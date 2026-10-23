@@ -56,6 +56,19 @@ func (c *podCleanupFailureClient) Transact(ctx context.Context, ops ...ovsdb.Ope
 	return c.Client.Transact(ctx, ops...)
 }
 
+type failPodPolicyCleanupClient struct {
+	libovsdbclient.Client
+}
+
+func (c *failPodPolicyCleanupClient) Transact(ctx context.Context, operations ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	for _, operation := range operations {
+		if operation.Table == nbdb.PortGroupTable {
+			return nil, fmt.Errorf("injected policy cleanup failure")
+		}
+	}
+	return c.Client.Transact(ctx, operations...)
+}
+
 func getPodAnnotations(fakeClient kubernetes.Interface, namespace, name string) string {
 	pod, err := fakeClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -483,6 +496,37 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 	})
 
 	ginkgo.Context("during execution", func() {
+		ginkgo.It("preserves a new IP owner when policy cleanup is retried", func() {
+			t := newTPod(node1Name, "10.128.1.0/24", "10.128.1.2", "10.128.1.1",
+				"old-pod", "10.128.1.3", "0a:58:0a:80:01:03", "namespace1")
+			pod := ovntest.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
+			pod.UID = "old-uid"
+			setPodAnnotations(pod, t)
+			fakeOvn.startWithDBSetup(initialDB, pod, ovntest.NewNamespace(t.namespace), newNode(node1Name, "192.168.126.202/24"))
+			t.populateLogicalSwitchCache(fakeOvn)
+			gomega.Expect(fakeOvn.controller.reconcilePod(nil, pod, false)).To(gomega.Succeed())
+			portInfo, err := fakeOvn.controller.logicalPortCache.get(pod, ovntypes.DefaultNetworkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			np := NewNetworkPolicy(getPortNetworkPolicy("cleanup-policy", pod.Namespace, "role", "selected", 80))
+			np.portGroupName = "cleanup-policy"
+			np.localPods.Store(portInfo.name, portInfo.uuid)
+			fakeOvn.controller.networkPolicies.Store(np.getKey(), np)
+			fakeOvn.controller.addNetworkPolicyToNamespaceIndex(np)
+			gomega.Expect(libovsdbops.CreateOrUpdatePortGroups(fakeOvn.nbClient,
+				&nbdb.PortGroup{Name: np.portGroupName, Ports: []string{portInfo.uuid}})).To(gomega.Succeed())
+
+			fakeOvn.controller.nbClient = &failPodPolicyCleanupClient{Client: fakeOvn.nbClient}
+			err = fakeOvn.controller.deletePod(pod, portInfo)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("injected policy cleanup failure")))
+			gomega.Expect(fakeOvn.controller.lsManager.OwnsIPs(node1Name,
+				fakeOvn.controller.podIPOwner(pod, ovntypes.DefaultNetworkName), portInfo.ips)).To(gomega.BeFalse())
+			// A new allocation can be reserved before any new owner annotation is
+			// visible in the informer. The old delete retry must not free it.
+			gomega.Expect(fakeOvn.controller.lsManager.AllocateIPs(node1Name, "new-owner", portInfo.ips)).To(gomega.Succeed())
+			fakeOvn.controller.nbClient = fakeOvn.nbClient
+			gomega.Expect(fakeOvn.controller.deletePod(pod, portInfo)).To(gomega.Succeed())
+			gomega.Expect(fakeOvn.controller.lsManager.OwnsIPs(node1Name, "new-owner", portInfo.ips)).To(gomega.BeTrue())
+		})
 
 		ginkgo.DescribeTable("rolls back only newly reserved logical-port IPs", func(alreadyOwned bool) {
 			pod := ovntest.NewPod("namespace1", "pod1", node1Name, "")
