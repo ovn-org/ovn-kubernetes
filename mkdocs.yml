@@ -235,6 +235,7 @@ nav:
     - No-Overlay Mode: okeps/okep-5259-no-overlay.md
     - EVPN: okeps/okep-5088-evpn.md
     - DPU Healthcheck: okeps/okep-5674-dpu-healthcheck.md
+    - Remove per-node status updates: okeps/okep-6414-remove-per-node-status-update.md
     - Extend Primary UDN/CUDN to Support Multiple Cluster Subnets in Layer3 Topology: okeps/okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology.md
     - VRF-Lite Shared Gateway Mode with Uplinks: okeps/okep-6019-vrf-lite-shared-gateway-external-bridges.md
     - Disable Port Security: okeps/okep-3926-disable-port-security.md
