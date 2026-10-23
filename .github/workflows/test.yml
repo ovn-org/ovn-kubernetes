@@ -84,6 +84,9 @@ jobs:
     - name: Check out code
       uses: actions/checkout@v6
 
+    - name: Test area maintainer merge automation
+      run: node --test .github/scripts/area-merge.test.js
+
     - name: Set up Go
       uses: ./.github/actions/setup-go
       id: go
