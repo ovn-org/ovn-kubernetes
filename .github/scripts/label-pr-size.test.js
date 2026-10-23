@@ -80,13 +80,15 @@ test('counts additions and deletions across files', async () => {
   assert.deepEqual([...pr.labels], ['size/M']);
 });
 
-test('ignores dependency checksums, vendor code, and generated Go files', async t => {
+test('ignores dependency checksums, licenses, vendor code, and generated Go files', async t => {
   const ignoredFiles = [
     'go.sum',
     'go-controller/go.sum',
     'test/e2e/go.sum',
     'test/conformance/go.sum',
     'test/crd-integration/go.sum',
+    'LICENSES/packages/dependency/v1.0.0/LICENSE',
+    'LICENSES/packages/dependency/v1.0.0/NOTICE',
     'go-controller/vendor/dependency/source.go',
     'go-controller/pkg/crd/egressip/v1/zz_generated.deepcopy.go',
     'go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/clientset.go',
@@ -169,7 +171,10 @@ test('preserves PR labels when the new size label is missing from the repository
 });
 
 test('labels a PR containing only excluded files as XS', async () => {
-  const pr = createPullRequest([changedFile('go-controller/go.sum', 1000)]);
+  const pr = createPullRequest([
+    changedFile('go-controller/go.sum', 1000),
+    changedFile('LICENSES/packages/dependency/v1.0.0/LICENSE', 0, 1000),
+  ]);
   await pr.label();
   assert.deepEqual([...pr.labels], ['size/XS']);
 });
