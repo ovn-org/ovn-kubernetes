@@ -16,9 +16,13 @@ function isIgnoredFile(filename) {
     /^go-controller\/pkg\/crd\/[^/]+\/[^/]+\/apis\//.test(filename);
 }
 
-module.exports = async function labelPRSize({ github, context, core }) {
-  const pullRequest = { ...context.repo, pull_number: context.issue.number };
+async function labelPRSize({ github, context, core }, number) {
+  const pullRequest = { ...context.repo, pull_number: number };
   const { data: pr } = await github.rest.pulls.get(pullRequest);
+  if (pr.state !== 'open') {
+    return;
+  }
+
   const files = await github.paginate(github.rest.pulls.listFiles, {
     ...pullRequest,
     per_page: 100,
@@ -55,5 +59,23 @@ module.exports = async function labelPRSize({ github, context, core }) {
     if (existing.name.startsWith('size/') && existing.name !== label) {
       await github.rest.issues.removeLabel({ ...issue, name: existing.name });
     }
+  }
+}
+
+module.exports = async function labelPRSizes({ github, context, core }) {
+  let numbers;
+  if (context.eventName === 'workflow_dispatch') {
+    const prs = await github.paginate(github.rest.pulls.list, {
+      ...context.repo,
+      state: 'open',
+      per_page: 100,
+    });
+    numbers = prs.map(pr => pr.number);
+  } else {
+    numbers = [context.issue.number];
+  }
+
+  for (const number of numbers) {
+    await labelPRSize({ github, context, core }, number);
   }
 };

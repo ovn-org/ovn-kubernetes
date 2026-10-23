@@ -1,21 +1,28 @@
 name: "Pull Request Labeler"
 on:
-- pull_request_target
+  pull_request_target:
+  workflow_run:
+    workflows: ["Pull Request Review"]
+    types: [completed]
+  # Refresh size and approval labels on all open PRs after rollout or rule changes.
+  workflow_dispatch:
 
 jobs:
   labeler:
+    if: github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch'
     concurrency:
-      group: pr-labeler-${{ github.event.pull_request.number }}
+      group: pr-labeler-${{ github.event.pull_request.number || 'manual' }}
     permissions:
       contents: read
       pull-requests: write
     runs-on: ubuntu-26.04
     steps:
     - uses: actions/labeler@v5
-    # pull_request_target runs trusted base code, including the size-labeling script.
+      if: github.event_name == 'pull_request_target'
+    # PR events run trusted base code; manual refreshes use the default branch.
     - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       with:
-        ref: ${{ github.sha }}
+        ref: ${{ github.event_name == 'workflow_dispatch' && github.event.repository.default_branch || github.sha }}
         persist-credentials: false
         sparse-checkout: .github/scripts
     - name: Label PR size
@@ -24,3 +31,38 @@ jobs:
         script: |
           const labelPRSize = require('./.github/scripts/label-pr-size.js');
           await labelPRSize({ github, context, core });
+
+  approval-labeler:
+    # Refresh on PR changes, manual runs, or successful review workflow completion.
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'pull_request_review' &&
+       github.event.workflow_run.conclusion == 'success')
+    concurrency:
+      # Use the same source branch key for PR and review events, including forks.
+      group: >-
+        pr-approval-${{
+          github.event.pull_request.head.repo.id ||
+          github.event.workflow_run.head_repository.id || 'manual'
+        }}-${{
+          github.event.pull_request.head.ref ||
+          github.event.workflow_run.head_branch || 'all'
+        }}
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-26.04
+    steps:
+    - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      with:
+        ref: ${{ github.event.repository.default_branch }}
+        persist-credentials: false
+        sparse-checkout: .github/scripts
+    - name: Label PR approvals
+      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+      with:
+        script: |
+          const labelPRApproval = require('./.github/scripts/label-pr-approval.js');
+          await labelPRApproval({ github, context, core });

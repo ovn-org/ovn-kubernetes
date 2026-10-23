@@ -17,6 +17,7 @@ function createPullRequest(files, labels = [], changedFiles = files.length) {
         get: async () => ({
           data: {
             number: 1,
+            state: 'open',
             changed_files: changedFiles,
             labels: [...currentLabels].map(name => ({ name })),
           },
@@ -178,4 +179,68 @@ test('uses XXL when the file list is incomplete', async () => {
   const pr = createPullRequest([changedFile('source.go', 10)], ['size/XL', 'kind/bug'], 3001);
   await pr.label();
   assert.deepEqual([...pr.labels].sort(), ['kind/bug', 'size/XXL']);
+});
+
+test('refreshes sizes on all open PRs across pages on manual dispatch', async () => {
+  const prs = Array.from({ length: 280 }, (_, i) => ({
+    number: i + 1,
+    state: i === 0 ? 'closed' : 'open',
+    changed_files: 1,
+    labels: new Set(['size/XS', 'has-approval', 'kind/bug']),
+  }));
+  const github = {
+    rest: {
+      pulls: {
+        list: async ({ state, page, per_page }) => ({
+          data: prs.filter(pr => pr.state === state).slice((page - 1) * per_page, page * per_page),
+        }),
+        get: async ({ pull_number }) => {
+          const pr = prs[pull_number - 1];
+          // PR #1 starts closed and is excluded from the listing. PR #2 is
+          // listed while open, then closes before its labels are refreshed.
+          if (pull_number === 2) {
+            pr.state = 'closed';
+          }
+          return { data: { ...pr, labels: [...pr.labels].map(name => ({ name })) } };
+        },
+        listFiles: async ({ pull_number }) => ({
+          data: [changedFile('source.go', pull_number % 2 ? 30 : 10)],
+        }),
+      },
+      issues: {
+        addLabels: async ({ issue_number, labels }) => {
+          for (const label of labels) {
+            prs[issue_number - 1].labels.add(label);
+          }
+        },
+        removeLabel: async ({ issue_number, name }) => {
+          prs[issue_number - 1].labels.delete(name);
+        },
+      },
+    },
+    paginate: async (method, parameters) => {
+      const results = [];
+      let page = 1;
+      let data;
+
+      do {
+        ({ data } = await method({ ...parameters, page }));
+        results.push(...data);
+        page++;
+      } while (data.length === parameters.per_page);
+
+      return results;
+    },
+  };
+
+  await labelPRSize({
+    github,
+    context: { repo: { owner: 'test', repo: 'test' }, eventName: 'workflow_dispatch' },
+    core: { info() {} },
+  });
+
+  for (const pr of prs) {
+    const size = pr.state === 'closed' ? 'XS' : pr.number % 2 ? 'M' : 'S';
+    assert.deepEqual(pr.labels, new Set([`size/${size}`, 'has-approval', 'kind/bug']));
+  }
 });
