@@ -149,6 +149,8 @@ func run(ctx context.Context, stopCh <-chan struct{}, podResCli podresourcesapi.
 			cpus, err := getNonPinnedCPUs(ctx, podResCli)
 			if err != nil {
 				klog.Warningf("Error while trying to get system non pinned CPUs: %v", err)
+				// retain the current CPU affinity mask until the next successful query.
+				continue
 			}
 			// add reservedSystemCPUs as well, because PodResourcesAPI does not count for them.
 			cpus = cpus.Union(reservedCPUs)
