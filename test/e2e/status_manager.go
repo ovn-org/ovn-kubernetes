@@ -6,7 +6,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -23,8 +22,7 @@ import (
 
 var _ = ginkgo.Describe("Status manager validation", feature.EgressFirewall, func() {
 	const (
-		svcname                string = "status-manager"
-		egressFirewallYamlFile string = "egress-fw.yml"
+		svcname string = "status-manager"
 	)
 
 	f := wrappedTestFramework(svcname)
@@ -42,28 +40,11 @@ spec:
     to:
       cidrSelector: 1.2.3.4/24
 `, f.Namespace.Name)
-		// write the config to a file for application and defer the removal
-		if err := os.WriteFile(egressFirewallYamlFile, []byte(egressFirewallConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		// create the CRD config parameters
-		applyArgs := []string{
-			"apply",
-			fmt.Sprintf("--namespace=%s", f.Namespace.Name),
-			"-f",
-			egressFirewallYamlFile,
-		}
-		framework.Logf("Applying EgressFirewall configuration: %s ", applyArgs)
+		framework.Logf("Applying EgressFirewall configuration: %s", egressFirewallConfig)
 		// apply the egress firewall configuration
-		e2ekubectl.RunKubectlOrDie(f.Namespace.Name, applyArgs...)
+		e2ekubectl.RunKubectlOrDieInput(f.Namespace.Name, egressFirewallConfig, "apply", "-f", "-")
 		// check status
 		checkEgressFirewallStatus(f.Namespace.Name, false, true, true)
-	})
-
-	ginkgo.AfterEach(func() {
-		if err := os.Remove(egressFirewallYamlFile); err != nil {
-			framework.Logf("Unable to remove the CRD config from disk: %v", err)
-		}
 	})
 
 	ginkgo.It("Should validate the egress firewall status when adding a new node zone", func() {

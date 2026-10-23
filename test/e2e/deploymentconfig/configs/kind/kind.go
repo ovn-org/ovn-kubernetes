@@ -182,3 +182,7 @@ func (k *kind) GetNodeMachineNetworks() (map[string][]string, error) {
 	}
 	return result, nil
 }
+
+func (k *kind) OVNControllerLogPath() string {
+	return "/var/log/openvswitch/ovn-controller.log"
+}

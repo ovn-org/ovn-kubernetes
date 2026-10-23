@@ -57,4 +57,7 @@ type DeploymentConfig interface {
 	// keyed by node name. Each node's slice contains IPv4 and/or IPv6 CIDRs
 	// depending on the cluster's IP family configuration.
 	GetNodeMachineNetworks() (map[string][]string, error)
+	// OVNControllerLogPath returns the host filesystem path of the ovn-controller log
+	// on cluster nodes (used by e2e to grep ACL audit lines).
+	OVNControllerLogPath() string
 }

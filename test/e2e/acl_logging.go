@@ -26,7 +26,6 @@ import (
 const (
 	logSeverityAnnotation = "k8s.ovn.org/acl-logging"
 	maxPokeRetries        = 15
-	ovnControllerLogPath  = "/var/log/openvswitch/ovn-controller.log"
 	pokeInterval          = 1 * time.Second
 )
 
@@ -1049,12 +1048,11 @@ spec:
 }
 
 func makeEgressFirewall(ns, allowedDstIP, mask, denyCIDR string) error {
-	egressFirewallYaml := "egressfirewall.yaml"
-	var egressFirewallConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+	egressFirewallConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressFirewall
 metadata:
   name: default
-  namespace: `+ns+`
+  namespace: %s
 spec:
   egress:
   - type: Allow
@@ -1063,19 +1061,9 @@ spec:
   - type: Deny
     to:
       cidrSelector: %s
-`, allowedDstIP, mask, denyCIDR)
+`, ns, allowedDstIP, mask, denyCIDR)
 
-	if err := os.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
-		framework.Failf("Unable to write CRD config to disk: %v", err)
-	}
-
-	defer func() {
-		if err := os.Remove(egressFirewallYaml); err != nil {
-			framework.Logf("Unable to remove the CRD config from disk: %v", err)
-		}
-	}()
-
-	_, err := e2ekubectl.RunKubectl(ns, "create", "-f", egressFirewallYaml)
+	_, err := e2ekubectl.RunKubectlInput(ns, egressFirewallConfig, "create", "-f", "-")
 	return err
 }
 
