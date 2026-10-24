@@ -898,10 +898,15 @@ func GetConntrackZone() int {
 }
 
 // IsLastUpdatedByManager checks if an object was updated by the manager last,
-// as indicated by a set of managed fields.
+// as indicated by a set of managed fields. Entries without a timestamp are
+// ignored, as the API server leaves the time unset for some server-side
+// applies that did not change the object.
 func IsLastUpdatedByManager(manager string, managedFields []metav1.ManagedFieldsEntry) bool {
 	var lastUpdateTheirs, lastUpdateOurs time.Time
 	for _, managedFieldEntry := range managedFields {
+		if managedFieldEntry.Time == nil {
+			continue
+		}
 		switch managedFieldEntry.Manager {
 		case manager:
 			if managedFieldEntry.Time.Time.After(lastUpdateOurs) {

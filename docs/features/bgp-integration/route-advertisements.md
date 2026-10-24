@@ -1098,6 +1098,19 @@ B>* 172.26.0.0/16 [200/0] via 172.18.0.5, breth0 (vrf default), weight 1, 01:39:
 ...
 ```
 
+### Managed-fields timestamps
+
+The route-advertisements controller uses Kubernetes managed-fields timestamps
+to avoid reconciling its own updates. A managed-fields entry can legitimately
+lack a `time`, for example after a server-side apply that changes field ownership
+without changing the object. Such entries are ignored when determining the last
+updater; an untimed entry alone does not identify an update as the controller's
+own work.
+
+An `FRRConfiguration` with an untimed entry must not cause the cluster manager
+to restart. To inspect these entries when troubleshooting, use
+`kubectl get frrconfiguration <name> -n <namespace> --show-managed-fields -o yaml`.
+
 ### Troubleshooting dataplane
 
 FRR applies its configuration to the host networking stack in the form of

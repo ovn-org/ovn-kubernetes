@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -855,6 +856,67 @@ func TestDoesEndpointSliceContainEligibleEndpoint(t *testing.T) {
 			if !reflect.DeepEqual(answer, tt.want) {
 				t.Errorf("got %v, want %v", answer, tt.want)
 			}
+		})
+	}
+}
+
+func TestIsLastUpdatedByManager(t *testing.T) {
+	older := metav1.NewTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	newer := metav1.NewTime(older.Add(time.Second))
+
+	tests := []struct {
+		name          string
+		managedFields []metav1.ManagedFieldsEntry
+		want          bool
+	}{
+		{
+			name: "our manager is the most recent",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours", Time: &newer},
+				{Manager: "theirs", Time: &older},
+			},
+			want: true,
+		},
+		{
+			name: "another manager is the most recent",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours", Time: &older},
+				{Manager: "theirs", Time: &newer},
+			},
+			want: false,
+		},
+		{
+			name: "entry of another manager without a time is ignored",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours", Time: &older},
+				{Manager: "theirs"},
+			},
+			want: true,
+		},
+		{
+			name: "entry of our manager without a time is ignored",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours"},
+				{Manager: "theirs", Time: &older},
+			},
+			want: false,
+		},
+		{
+			name: "only entries without a time",
+			managedFields: []metav1.ManagedFieldsEntry{
+				{Manager: "ours"},
+				{Manager: "theirs"},
+			},
+			want: false,
+		},
+		{
+			name: "no entries",
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsLastUpdatedByManager("ours", tt.managedFields), "unexpected last-updater result for managed fields: %+v", tt.managedFields)
 		})
 	}
 }
