@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	egressfirewallapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
@@ -1131,6 +1132,7 @@ var _ = ginkgo.Describe("OVN EgressFirewall Operations", func() {
 					// eventually, we should see the changes in the namespace reflected in the database
 					acl := expectedDatabaseState[len(expectedDatabaseState)-2].(*nbdb.ACL)
 					acl.Log = true
+					acl.Meter = ptr.To(t.OvnACLLoggingMeter)
 					acl.Severity = &logSeverity
 					gomega.Eventually(fakeOVN.nbClient).Should(libovsdb.HaveData(expectedDatabaseState))
 

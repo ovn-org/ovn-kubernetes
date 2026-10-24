@@ -94,6 +94,7 @@ func getDefaultPGForANPSubject(anpName string, portUUIDs []string, acls []*nbdb.
 	return pg
 }
 
+// getANPGressACL given the properties of an AdminNetworkPolicy return the array of ACLs that openshift is expecting to create
 func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	ruleIndex int32, ports *[]anpapi.AdminNetworkPolicyPort,
 	namedPorts map[string][]libovsdbutil.NamedNetworkPolicyPort, banp bool) []*nbdb.ACL {
@@ -103,7 +104,7 @@ func getANPGressACL(action, anpName, direction string, rulePriority int32,
 	acl.Action = action
 	acl.Severity = nil
 	acl.Log = false
-	acl.Meter = ptr.To(types.OvnACLLoggingMeter)
+	acl.Meter = nil
 	acl.Priority = int(rulePriority)
 	acl.Tier = types.DefaultANPACLTier
 	if banp {
@@ -1546,6 +1547,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					acl := acl
 					// update ACL logging information
 					acl.Log = true
+					acl.Meter = ptr.To(types.OvnACLLoggingMeter)
 					if acl.Action == nbdb.ACLActionPass {
 						acl.Severity = ptr.To(nbdb.ACLSeverityNotice)
 					} else if acl.Action == nbdb.ACLActionDrop {
@@ -1577,6 +1579,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					acl := acl.(*nbdb.ACL)
 					// update ACL logging information
 					acl.Log = true
+					acl.Meter = ptr.To(types.OvnACLLoggingMeter)
 					if acl.Action == nbdb.ACLActionPass {
 						acl.Severity = ptr.To(nbdb.ACLSeverityInfo)
 					} else if acl.Action == nbdb.ACLActionDrop {
@@ -1596,6 +1599,7 @@ var _ = ginkgo.Describe("OVN ANP Operations", func() {
 					acl := acl.(*nbdb.ACL)
 					// update ACL logging information
 					acl.Log = false
+					acl.Meter = nil
 					acl.Severity = nil
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))

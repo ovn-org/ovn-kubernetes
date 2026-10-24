@@ -262,7 +262,7 @@ direction           : to-lport
 external_ids        : {default-deny-policy-type=Ingress}
 log                 : false
 match               : "outport == @a16982411286042166782 && ((igmp || (ip4.src == $a5154718082306775057 && ip4.mcast)) || (mldv1 || mldv2 || (ip6.src == $a5154715883283518635 && (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))))"
-meter               : acl-logging
+meter               : []
 name                : default_MulticastAllowIngress
 priority            : 1012
 severity            : info
@@ -273,7 +273,7 @@ direction           : from-lport
 external_ids        : {default-deny-policy-type=Egress}
 log                 : false
 match               : "inport == @a16982411286042166782 && (ip4.mcast || (mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1)))"
-meter               : acl-logging
+meter               : []
 name                : default_MulticastAllowEgress
 priority            : 1012
 severity            : info

@@ -814,6 +814,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					acl := acl
 					// update ACL logging information
 					acl.Log = true
+					acl.Meter = ptr.To(types.OvnACLLoggingMeter)
 					if acl.Action == nbdb.ACLActionDrop {
 						acl.Severity = ptr.To(nbdb.ACLSeverityAlert)
 					} else if acl.Action == nbdb.ACLActionAllowRelated {
@@ -857,6 +858,7 @@ var _ = ginkgo.Describe("OVN BANP Operations", func() {
 					acl := acl.(*nbdb.ACL)
 					// update ACL logging information
 					acl.Log = false
+					acl.Meter = nil
 					acl.Severity = nil
 				}
 				gomega.Eventually(fakeOVN.nbClient).Should(libovsdbtest.HaveDataIgnoringUUIDs(expectedDatabaseState))

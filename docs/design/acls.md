@@ -73,7 +73,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "(ip4.dst == $a5272457940446250407) && ip4.src == $a4322231855293774466"
-meter               : acl-logging
+meter               : []
 name                : "EF:default:10000"
 options             : {}
 priority            : 10000
@@ -91,7 +91,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "(ip4.dst == 1.2.3.0/24) && ip4.src == $a4322231855293774466 && ((udp && ( udp.dst == 55 )))"
-meter               : acl-logging
+meter               : []
 name                : "EF:default:9999"
 options             : {}
 priority            : 9999
@@ -109,7 +109,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "(ip4.dst == 0.0.0.0/0 && ip4.dst != 10.244.0.0/16) && ip4.src == $a4322231855293774466"
-meter               : acl-logging
+meter               : []
 name                : "EF:default:9998"
 options             : {}
 priority            : 9998
@@ -144,7 +144,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "inport == @clusterRtrPortGroup && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {apply-after-lb="true"}
 priority            : 1012
@@ -162,7 +162,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "outport == @clusterRtrPortGroup && (ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {}
 priority            : 1012
@@ -180,7 +180,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "(ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {apply-after-lb="true"}
 priority            : 1011
@@ -198,7 +198,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "(ip4.mcast || mldv1 || mldv2 || (ip6.dst[120..127] == 0xff && ip6.dst[116] == 1))"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {}
 priority            : 1011
@@ -220,7 +220,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "outport == @a16982411286042166782 && (igmp || (ip4.src == $a4322231855293774466 && ip4.mcast))"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {}
 priority            : 1012
@@ -238,7 +238,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "inport == @a16982411286042166782 && ip4.mcast"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {apply-after-lb="true"}
 priority            : 1012
@@ -262,7 +262,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "ip4.src==10.244.2.2"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {}
 priority            : 1001
@@ -287,7 +287,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "ip4.src == 169.254.169.5"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {}
 priority            : 1001
@@ -305,7 +305,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "ip4.src == 169.254.169.5"
-meter               : acl-logging
+meter               : []
 name                : []
 options             : {apply-after-lb="true"}
 priority            : 1001
@@ -331,7 +331,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "inport == @a16982411286042166782_egressDefaultDeny && (arp || nd)"
-meter               : acl-logging
+meter               : []
 name                : "NP:default:Egress"
 options             : {apply-after-lb="true"}
 priority            : 1001
@@ -350,7 +350,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "inport == @a16982411286042166782_egressDefaultDeny"
-meter               : acl-logging
+meter               : []
 name                : "NP:default:Egress"
 options             : {apply-after-lb="true"}
 priority            : 1000
@@ -373,7 +373,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "outport == @a16982411286042166782_ingressDefaultDeny && (arp || nd)"
-meter               : acl-logging
+meter               : []
 name                : "NP:default:Ingress"
 options             : {}
 priority            : 1001
@@ -392,7 +392,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "outport == @a16982411286042166782_ingressDefaultDeny"
-meter               : acl-logging
+meter               : []
 name                : "NP:default:Ingress"
 options             : {}
 priority            : 1000
@@ -446,7 +446,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "ip4.dst == 10.244.1.5/32 && inport == @a2653181086423119552"
-meter               : acl-logging
+meter               : []
 name                : "NP:default:test-policy:egress:0:-1:0"
 options             : {apply-after-lb="true"}
 priority            : 1001
@@ -467,7 +467,7 @@ external_ids        : {
 label               : 0
 log                 : false
 match               : "(ip4.src == {$a3733136965153973077} || (ip4.src == 169.254.169.5 && ip4.dst == {$a3733136965153973077})) && outport == @a2653181086423119552"
-meter               : acl-logging
+meter               : []
 name                : "NP:default:test-policy:ingress:0:-1:-1"
 options             : {}
 priority            : 1001

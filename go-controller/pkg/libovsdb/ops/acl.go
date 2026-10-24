@@ -95,7 +95,7 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	if len(name) != 0 {
 		realName = &name
 	}
-	if len(meter) != 0 {
+	if log && len(meter) != 0 {
 		realMeter = &meter
 	}
 	if len(severity) != 0 {
@@ -118,12 +118,18 @@ func BuildACL(name string, direction nbdb.ACLDirection, priority int, match stri
 	return acl
 }
 
-func SetACLLogging(acl *nbdb.ACL, severity nbdb.ACLSeverity, log bool) {
+// SetACLLogging changes the logging properties of an ACL object.
+func SetACLLogging(acl *nbdb.ACL, severity nbdb.ACLSeverity, log bool, meter string) {
 	var realSeverity *string
+	var realMeter *string
 	if len(severity) != 0 {
 		realSeverity = &severity
 	}
+	if log && len(meter) != 0 {
+		realMeter = &meter
+	}
 	acl.Severity = realSeverity
+	acl.Meter = realMeter
 	acl.Log = log
 }
 
