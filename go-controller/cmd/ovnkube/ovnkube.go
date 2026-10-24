@@ -175,7 +175,22 @@ func setupPIDFile(pidfile string) error {
 		if err != nil {
 			return fmt.Errorf("pidfile %s exists but can't be read: %v", pidfile, err)
 		}
-		_, err1 := os.Stat("/proc/" + string(pid[:]) + "/cmdline")
+		pidStr := strings.TrimSpace(string(pid))
+		// In containerized deployments ovnkube usually runs at a low,
+		// deterministic PID (1 or 8 etc.) because of the pod's PID
+		// namespace. If the pidfile lives on a hostPath that persists
+		// across pod restarts, a fresh container reads back its OWN
+		// future PID and the /proc/<pid>/cmdline check below would
+		// always succeed (the pid is self), falsely concluding another
+		// ovnkube is running. Treat self-PID-in-pidfile as a stale
+		// leftover, same as the dead-process branch below.
+		if pidStr == fmt.Sprintf("%d", os.Getpid()) {
+			if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
+				klog.Errorf("Failed to write pidfile %s (%v). Ignoring..", pidfile, err)
+			}
+			return nil
+		}
+		_, err1 := os.Stat("/proc/" + pidStr + "/cmdline")
 		if os.IsNotExist(err1) {
 			// Left over pid from dead process
 			if err := os.WriteFile(pidfile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644); err != nil {
