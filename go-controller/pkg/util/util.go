@@ -1120,3 +1120,109 @@ func IsNoOverlaySNATExemptionNeeded(netInfo NetInfo) bool {
 		netInfo.OutboundSNAT() == types.NoOverlaySNATEnabled &&
 		config.Gateway.Mode == config.GatewayModeShared
 }
+
+// PortToZoneToLBEndpoints maps service port keys to zone names and their load balancer endpoints.
+type PortToZoneToLBEndpoints map[string]map[string]LBEndpoints
+
+// groupEndpointsByZoneHint organizes endpoints by their Hints.ForZones zone names.
+func groupEndpointsByZoneHint(endpoints []discoveryv1.Endpoint) map[string][]discoveryv1.Endpoint {
+	zoneEndpoints := map[string][]discoveryv1.Endpoint{}
+	for _, endpoint := range endpoints {
+		if endpoint.Hints == nil {
+			continue
+		}
+		for _, forZone := range endpoint.Hints.ForZones {
+			zoneEndpoints[forZone.Name] = append(zoneEndpoints[forZone.Name], endpoint)
+		}
+	}
+	return zoneEndpoints
+}
+
+// groupEndpointsByNodeHint organizes endpoints by their Hints.ForNodes node names.
+func groupEndpointsByNodeHint(endpoints []discoveryv1.Endpoint) map[string][]discoveryv1.Endpoint {
+	nodeEndpoints := map[string][]discoveryv1.Endpoint{}
+	for _, endpoint := range endpoints {
+		if endpoint.Hints == nil {
+			continue
+		}
+		for _, forNode := range endpoint.Hints.ForNodes {
+			nodeEndpoints[forNode.Name] = append(nodeEndpoints[forNode.Name], endpoint)
+		}
+	}
+	return nodeEndpoints
+}
+
+// GetZoneHintEndpointsForService extracts zone-hint-based endpoints from EndpointSlices.
+func GetZoneHintEndpointsForService(endpointSlices []*discoveryv1.EndpointSlice, service *corev1.Service) PortToZoneToLBEndpoints {
+	zoneEndpoints := make(PortToZoneToLBEndpoints)
+
+	forEachEndpointPort(endpointSlices, service, func(slicePortKey string, targetPortNumber int32, endpointList []discoveryv1.Endpoint) {
+		zoneEpsByZone := groupEndpointsByZoneHint(endpointList)
+		for zone, zoneEps := range zoneEpsByZone {
+			entry, err := buildLBEndpointEntry(service, targetPortNumber, zoneEps)
+			if err != nil {
+				continue
+			}
+			if zoneEndpoints[slicePortKey] == nil {
+				zoneEndpoints[slicePortKey] = map[string]LBEndpoints{}
+			}
+			zoneEndpoints[slicePortKey][zone] = append(zoneEndpoints[slicePortKey][zone], entry)
+		}
+	})
+
+	return zoneEndpoints
+}
+
+// GetNodeHintEndpointsForService extracts node-hint-based endpoints from EndpointSlices.
+func GetNodeHintEndpointsForService(endpointSlices []*discoveryv1.EndpointSlice, service *corev1.Service, nodes sets.Set[string]) PortToNodeToLBEndpoints {
+	nodeHintEndpoints := make(PortToNodeToLBEndpoints)
+
+	forEachEndpointPort(endpointSlices, service, func(slicePortKey string, targetPortNumber int32, endpointList []discoveryv1.Endpoint) {
+		nodeEpsByNode := groupEndpointsByNodeHint(endpointList)
+		for node, nodeEps := range nodeEpsByNode {
+			if !nodes.Has(node) {
+				continue
+			}
+			entry, err := buildLBEndpointEntry(service, targetPortNumber, nodeEps)
+			if err != nil {
+				continue
+			}
+			if nodeHintEndpoints[slicePortKey] == nil {
+				nodeHintEndpoints[slicePortKey] = map[string]LBEndpoints{}
+			}
+			nodeHintEndpoints[slicePortKey][node] = append(nodeHintEndpoints[slicePortKey][node], entry)
+		}
+	})
+
+	return nodeHintEndpoints
+}
+
+// forEachEndpointPort iterates over parsed endpoint slices and calls fn for each
+// valid (service-port-key, target-port-number, endpoint-list) combination.
+func forEachEndpointPort(endpointSlices []*discoveryv1.EndpointSlice, service *corev1.Service,
+	fn func(slicePortKey string, targetPortNumber int32, endpointList []discoveryv1.Endpoint)) {
+
+	te := newTargetEndpoints(endpointSlices)
+
+	validServicePortKeys := map[string]bool{}
+	if service != nil {
+		for _, servicePort := range service.Spec.Ports {
+			validServicePortKeys[GetServicePortKey(servicePort.Protocol, servicePort.Name)] = true
+		}
+	}
+
+	for portName, protocolMap := range te {
+		for protocol, portNumberMap := range protocolMap {
+			slicePortKey := GetServicePortKey(protocol, portName)
+			if service != nil && !validServicePortKeys[slicePortKey] {
+				continue
+			}
+
+			portNumbers := slices.Collect(maps.Keys(portNumberMap))
+			slices.Sort(portNumbers)
+			for _, targetPortNumber := range portNumbers {
+				fn(slicePortKey, targetPortNumber, portNumberMap[targetPortNumber])
+			}
+		}
+	}
+}

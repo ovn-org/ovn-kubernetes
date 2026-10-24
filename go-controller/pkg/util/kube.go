@@ -915,3 +915,23 @@ func IsLastUpdatedByManager(manager string, managedFields []metav1.ManagedFields
 	}
 	return lastUpdateOurs.After(lastUpdateTheirs)
 }
+
+func ServiceHasTrafficDistributionPreferSameZone(service *corev1.Service) bool {
+	if service.Spec.TrafficDistribution == nil {
+		return false
+	}
+	td := *service.Spec.TrafficDistribution
+	return td == corev1.ServiceTrafficDistributionPreferSameZone ||
+		td == corev1.ServiceTrafficDistributionPreferClose
+}
+
+func ServiceHasTrafficDistributionPreferSameNode(service *corev1.Service) bool {
+	if service.Spec.TrafficDistribution == nil {
+		return false
+	}
+	return *service.Spec.TrafficDistribution == corev1.ServiceTrafficDistributionPreferSameNode
+}
+
+func ServiceHasTrafficDistribution(service *corev1.Service) bool {
+	return ServiceHasTrafficDistributionPreferSameZone(service) || ServiceHasTrafficDistributionPreferSameNode(service)
+}

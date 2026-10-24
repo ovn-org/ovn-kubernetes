@@ -44,6 +44,14 @@ type lbConfig struct {
 	internalTrafficLocal bool
 	// indicates if this LB is configuring service of type NodePort.
 	hasNodePort bool
+
+	// trafficDistribution: PreferSameZone/PreferClose support
+	preferSameZone    bool
+	zoneHintEndpoints map[string]util.LBEndpoints // zone name -> endpoints from Hints.ForZones
+
+	// trafficDistribution: PreferSameNode support
+	preferSameNode    bool
+	nodeHintEndpoints map[string]util.LBEndpoints // node name -> endpoints from Hints.ForNodes
 }
 
 func makeNodeSwitchTargetIPs(node string, clusterEntry util.LBEndpointEntry, c *lbConfig) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool) {
@@ -151,6 +159,18 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 		klog.Warningf("Failed to get endpoints for service %s/%s during LB config build: %v",
 			service.Namespace, service.Name, err)
 	}
+
+	preferSameZone := util.ServiceHasTrafficDistributionPreferSameZone(service)
+	preferSameNode := util.ServiceHasTrafficDistributionPreferSameNode(service)
+	var portToZoneHintEndpoints util.PortToZoneToLBEndpoints
+	var portToNodeHintEndpoints util.PortToNodeToLBEndpoints
+	if preferSameZone {
+		portToZoneHintEndpoints = util.GetZoneHintEndpointsForService(endpointSlices, service)
+	}
+	if preferSameNode {
+		portToNodeHintEndpoints = util.GetNodeHintEndpointsForService(endpointSlices, service, nodes)
+	}
+
 	for _, svcPort := range service.Spec.Ports {
 		svcPortKey := util.GetServicePortKey(svcPort.Protocol, svcPort.Name)
 		clusterEndpoints := portToClusterEndpoints[svcPortKey]
@@ -210,6 +230,9 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 
 		// Build the clusterIP config
 		// This is NEVER influenced by ExternalTrafficPolicy
+		zoneHintEndpoints := portToZoneHintEndpoints[svcPortKey]
+		nodeHintEndpoints := portToNodeHintEndpoints[svcPortKey]
+
 		clusterIPConfig := lbConfig{
 			protocol:             svcPort.Protocol,
 			inport:               svcPort.Port,
@@ -219,12 +242,17 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 			externalTrafficLocal: false, // always false for ClusterIPs
 			internalTrafficLocal: internalTrafficLocal,
 			hasNodePort:          false,
+			preferSameZone:       preferSameZone,
+			zoneHintEndpoints:    zoneHintEndpoints,
+			preferSameNode:       preferSameNode,
+			nodeHintEndpoints:    nodeHintEndpoints,
 		}
 
 		// Normally, the ClusterIP LB is global (on all node switches and routers),
 		// unless any of the following are true:
 		// - Any of the endpoints are host-network
 		// - ETP=local service backed by non-local-host-networked endpoints
+		// - trafficDistribution is set (PreferSameZone, PreferSameNode, or PreferClose)
 		//
 		// In that case, we need to create per-node LBs.
 		ips := []string{}
@@ -232,7 +260,7 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 			ips = append(ips, ep.V4IPs...)
 			ips = append(ips, ep.V6IPs...)
 		}
-		if hasHostEndpoints(ips, netInfo) || internalTrafficLocal {
+		if hasHostEndpoints(ips, netInfo) || internalTrafficLocal || preferSameZone || preferSameNode {
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -660,8 +688,38 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 					routerV4targets = append(routerV4targets, joinHostsPort(routerV4TargetIPs, entry.Port)...)
 					routerV6targets = append(routerV6targets, joinHostsPort(routerV6TargetIPs, entry.Port)...)
 
-					switchV4targets = append(switchV4targets, joinHostsPort(entry.V4IPs, entry.Port)...)
-					switchV6targets = append(switchV6targets, joinHostsPort(entry.V6IPs, entry.Port)...)
+					if cfg.preferSameZone && node.topologyZone != "" {
+						if zoneEps, ok := cfg.zoneHintEndpoints[node.topologyZone]; ok {
+							zoneEntry := zoneEps.GetEntryByPort(entry.Port)
+							if len(zoneEntry.V4IPs) > 0 {
+								switchV4targets = append(switchV4targets, joinHostsPort(zoneEntry.V4IPs, entry.Port)...)
+								switchV6targets = append(switchV6targets, joinHostsPort(zoneEntry.V6IPs, entry.Port)...)
+							} else {
+								switchV4targets = append(switchV4targets, joinHostsPort(entry.V4IPs, entry.Port)...)
+								switchV6targets = append(switchV6targets, joinHostsPort(entry.V6IPs, entry.Port)...)
+							}
+						} else {
+							switchV4targets = append(switchV4targets, joinHostsPort(entry.V4IPs, entry.Port)...)
+							switchV6targets = append(switchV6targets, joinHostsPort(entry.V6IPs, entry.Port)...)
+						}
+					} else if cfg.preferSameNode {
+						if nodeEps, ok := cfg.nodeHintEndpoints[node.name]; ok {
+							nodeEntry := nodeEps.GetEntryByPort(entry.Port)
+							if len(nodeEntry.V4IPs) > 0 {
+								switchV4targets = append(switchV4targets, joinHostsPort(nodeEntry.V4IPs, entry.Port)...)
+								switchV6targets = append(switchV6targets, joinHostsPort(nodeEntry.V6IPs, entry.Port)...)
+							} else {
+								switchV4targets = append(switchV4targets, joinHostsPort(entry.V4IPs, entry.Port)...)
+								switchV6targets = append(switchV6targets, joinHostsPort(entry.V6IPs, entry.Port)...)
+							}
+						} else {
+							switchV4targets = append(switchV4targets, joinHostsPort(entry.V4IPs, entry.Port)...)
+							switchV6targets = append(switchV6targets, joinHostsPort(entry.V6IPs, entry.Port)...)
+						}
+					} else {
+						switchV4targets = append(switchV4targets, joinHostsPort(entry.V4IPs, entry.Port)...)
+						switchV6targets = append(switchV6targets, joinHostsPort(entry.V6IPs, entry.Port)...)
+					}
 
 					switchV4LocalTargets = append(switchV4LocalTargets, joinHostsPort(switchV4TargetIPs, entry.Port)...)
 					switchV6LocalTargets = append(switchV6LocalTargets, joinHostsPort(switchV6TargetIPs, entry.Port)...)

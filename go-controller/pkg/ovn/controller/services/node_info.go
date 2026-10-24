@@ -32,6 +32,9 @@ type nodeInfo struct {
 	// if nodePort is disabled on this node?
 	nodePortDisabled bool
 
+	// The Kubernetes availability zone from the topology.kubernetes.io/zone label
+	topologyZone string
+
 	// The list of node's management IPs
 	mgmtIPs []net.IP
 }
@@ -112,6 +115,7 @@ func nodeInfoForNetwork(node *corev1.Node, netInfo util.NetInfo) (*nodeInfo, err
 		switchName:         switchName,
 		chassisID:          chassisID,
 		nodePortDisabled:   !nodePortEnabled,
+		topologyZone:       node.Labels[corev1.LabelTopologyZone],
 	}
 	for i := range hsn {
 		ni.podSubnets = append(ni.podSubnets, *hsn[i])
