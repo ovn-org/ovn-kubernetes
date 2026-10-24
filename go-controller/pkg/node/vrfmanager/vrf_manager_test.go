@@ -367,6 +367,54 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkSetNoMaster", enslaveLinkMock1)
 		})
 
+		ginkgo.It("refuses to release a slave when a non VRF device holds the VRF name", func() {
+			nonVRFLink := new(netlink_mocks.Link)
+			nonVRFLink.On("Attrs").Return(&netlink.LinkAttrs{Name: "dummy0", Index: 42}, nil)
+			nlMock.On("LinkByName", "dummy0").Return(nonVRFLink, nil)
+			c.vrfs[42] = newVRF("dummy0", 1042, enslaveLinkName1, nil)
+
+			err := c.DeleteVRFSlave("dummy0", enslaveLinkName1)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("non VRF device")))
+			nlMock.AssertNotCalled(ginkgo.GinkgoT(), "LinkSetNoMaster", mock.Anything)
+		})
+
+		ginkgo.It("releases a slave from the table the VRF device actually uses, not the cached one", func() {
+			slaveLinkIndex := getLinkIndex(enslaveLinkName1)
+			deviceTable := int(getVRFTable(vrfLinkName1))
+			// The cache holds a different desired table id, as in the
+			// recreation window after a table conflict; the slave routes live
+			// in the device's actual table.
+			c.vrfs[getLinkIndex(vrfLinkName1)] = newVRF(vrfLinkName1, getVRFTable(vrfLinkName1)+1, enslaveLinkName1, nil)
+			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkIndex(vrfLinkName1), Index: slaveLinkIndex}, nil)
+			migratedRoute := netlink.Route{
+				LinkIndex: slaveLinkIndex,
+				Gw:        net.ParseIP("192.168.1.1"),
+				Protocol:  unix.RTPROT_DHCP,
+				Table:     deviceTable,
+			}
+			nlMock.On("RouteListFiltered", netlink.FAMILY_ALL,
+				mock.MatchedBy(func(filter *netlink.Route) bool {
+					return filter.Table == deviceTable
+				}),
+				uint64(netlink.RT_FILTER_TABLE),
+			).Return([]netlink.Route{migratedRoute}, nil)
+			nlMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+			nlMock.On("LinkSetNoMaster", enslaveLinkMock1).Return(nil)
+			nlMock.On("RouteAdd", mock.Anything).Return(nil)
+			// The trailing sync recreates the device over the table conflict.
+			nlMock.On("LinkList").Return([]netlink.Link{buildVRF(vrfLinkName1), enslaveLinkMock1}, nil)
+			nlMock.On("LinkDelete", buildVRF(vrfLinkName1)).Return(nil)
+
+			err := c.DeleteVRFSlave(vrfLinkName1, enslaveLinkName1)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			// The capture read the device's table, so the migrated route made
+			// it back to the main table.
+			expectedRoute := migratedRoute
+			expectedRoute.Table = unix.RT_TABLE_MAIN
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "RouteAdd", &expectedRoute)
+		})
+
 		ginkgo.It("migrates the slave interface routes back to the main table on release, except OVN managed ones", func() {
 			slaveLinkIndex := getLinkIndex(enslaveLinkName1)
 			vrfTable := int(getVRFTable(vrfLinkName1))

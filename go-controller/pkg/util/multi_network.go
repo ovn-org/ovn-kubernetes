@@ -1584,6 +1584,21 @@ func GetAnnotatedNetworkName(netattachdef *nettypes.NetworkAttachmentDefinition)
 	return netattachdef.Annotations[types.OvnNetworkNameAnnotation]
 }
 
+// GetAnnotatedNetworkID gets the network ID annotated by cluster manager
+// nad controller, or types.InvalidID when the NAD carries no network-id
+// annotation. It returns an error when the annotation is not a valid integer.
+func GetAnnotatedNetworkID(netattachdef *nettypes.NetworkAttachmentDefinition) (int, error) {
+	annotation := netattachdef.Annotations[types.OvnNetworkIDAnnotation]
+	if annotation == "" {
+		return types.InvalidID, nil
+	}
+	id, err := strconv.Atoi(annotation)
+	if err != nil {
+		return types.InvalidID, fmt.Errorf("failed to parse annotated network ID %q: %w", annotation, err)
+	}
+	return id, nil
+}
+
 // ParseNADInfo parses config in NAD spec and return a NetAttachDefInfo object for User Defined Networks
 func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 	netconf, err := ParseNetConf(nad)
@@ -1604,12 +1619,12 @@ func ParseNADInfo(nad *nettypes.NetworkAttachmentDefinition) (NetInfo, error) {
 	if n.GetNetworkName() == types.DefaultNetworkName {
 		id = types.DefaultNetworkID
 	}
-	if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
-		annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
-		id, err = strconv.Atoi(annotated)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse annotated network ID: %w", err)
-		}
+	annotatedID, err := GetAnnotatedNetworkID(nad)
+	if err != nil {
+		return nil, err
+	}
+	if annotatedID != types.InvalidID {
+		id = annotatedID
 	}
 	n.SetNetworkID(id)
 

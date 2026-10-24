@@ -317,7 +317,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 		// set host interface name now for default network as it is already known; otherwise for secondary network,
 		// host interface will be renamed later.
 		if ifInfo.NetName == types.DefaultNetworkName {
-			hostIface.Name = containerID[:15]
+			hostIface.Name = containerID[:types.MaxInterfaceNameLength]
 		} else {
 			hostIface.Name = ""
 		}
@@ -369,7 +369,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 
 	// rename the host end of veth pair for the secondary network
 	if ifInfo.NetName != types.DefaultNetworkName {
-		hostIface.Name = containerID[:(15-len(ifnameSuffix))] + ifnameSuffix
+		hostIface.Name = containerID[:(types.MaxInterfaceNameLength-len(ifnameSuffix))] + ifnameSuffix
 		if err := renameLink(oldHostVethName, hostIface.Name); err != nil {
 			return nil, nil, fmt.Errorf("failed to rename %s to %s: %v", oldHostVethName, hostIface.Name, err)
 		}
@@ -388,8 +388,7 @@ func setupInterface(netns ns.NetNS, containerID, ifName string, ifInfo *PodInter
 // generate a unique interface name for the temporary netdev that will be moved to pod namespace
 func generateIfName(containerID string) string {
 	randomId := util.GenerateId(5) // random ID with 5 chars
-	// ifname max length is 15
-	return containerID[:(15-len(randomId))] + randomId
+	return containerID[:(types.MaxInterfaceNameLength-len(randomId))] + randomId
 }
 
 // Setup sriov interface in the pod
@@ -1058,7 +1057,7 @@ func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInf
 				}
 				if oldName == "" {
 					id := fmt.Sprintf("_0%d", link.Attrs().Index)
-					oldName = pr.SandboxID[:(15-len(id))] + id
+					oldName = pr.SandboxID[:(types.MaxInterfaceNameLength-len(id))] + id
 				}
 				if err := returnNetdevToHost(link, oldName, hostNS); err != nil {
 					return fmt.Errorf("%v %s", err, podDesc)
@@ -1091,7 +1090,7 @@ func (*defaultPodRequestInterfaceOps) UnconfigureInterface(pr *PodRequest, ifInf
 		var hostIfName string
 		if !util.IsNetworkSegmentationSupportEnabled() || isSecondary {
 			// this is a secondary network (not primary) or segmentation is not enabled
-			hostIfName = pr.SandboxID[:(15-len(ifnameSuffix))] + ifnameSuffix
+			hostIfName = pr.SandboxID[:(types.MaxInterfaceNameLength-len(ifnameSuffix))] + ifnameSuffix
 		}
 		if pr.CNIConf.DeviceID != "" {
 			hostIfName, err = util.GetFunctionRepresentorName(pr.CNIConf.DeviceID)

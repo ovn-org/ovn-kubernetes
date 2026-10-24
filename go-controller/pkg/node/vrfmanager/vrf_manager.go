@@ -300,8 +300,8 @@ func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32,
 	vrfm.mu.Lock()
 	defer vrfm.mu.Unlock()
 
-	if len(name) > 15 {
-		return fmt.Errorf("VRF Manager: VRF name %s must be within 15 characters", name)
+	if len(name) > types.MaxInterfaceNameLength {
+		return fmt.Errorf("VRF Manager: VRF name %s must be within %d characters", name, types.MaxInterfaceNameLength)
 	}
 	if table < uint32(config.OvnKubeNode.RoutingTableIDStart) {
 		return fmt.Errorf("VRF Manager: cannot manage a VRF %s with table %d lower than %d", name, table, config.OvnKubeNode.RoutingTableIDStart)
@@ -396,7 +396,16 @@ func (vrfm *Controller) DeleteVRFSlave(name string, slaveInterface string) error
 	if !ok {
 		return fmt.Errorf("failed to find VRF %s", name)
 	}
-	if err = releaseInterfaceFromVRF(slaveInterface, vrfLink.Attrs().Index, vrfDev.table); err != nil {
+	vrf, isVRF := vrfLink.(*netlink.Vrf)
+	if !isVRF {
+		return fmt.Errorf("node has another non VRF device with same name %s, refusing to release its slave %s",
+			name, slaveInterface)
+	}
+	// Release from the table the device actually uses: the cache holds the
+	// desired table id, which can differ from the actual one (recreation on
+	// table conflict), and a release with the wrong table would capture no
+	// routes while LinkSetNoMaster purges the real ones unrestored.
+	if err = releaseInterfaceFromVRF(slaveInterface, vrf.Index, vrf.Table); err != nil {
 		return fmt.Errorf("failed to release interface %s from VRF %s, err: %v",
 			slaveInterface, name, err)
 	}

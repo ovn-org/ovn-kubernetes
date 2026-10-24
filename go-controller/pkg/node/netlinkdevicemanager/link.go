@@ -15,16 +15,14 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // managedAliasPrefix is the prefix used in IFLA_IFALIAS to mark devices managed by this controller.
 // This allows safe cleanup: only delete devices with this prefix.
 // Format: "ovn-k8s-ndm:<type>:<name>" for debugging and collision avoidance.
 const managedAliasPrefix = "ovn-k8s-ndm:"
-
-// maxInterfaceNameLength is the maximum length for Linux interface names.
-// Linux's IFNAMSIZ is 16 (including null terminator), so max usable length is 15.
-const maxInterfaceNameLength = 15
 
 const maxVNI = 1<<24 - 1 // 16777215
 const maxVID = 4094
@@ -390,9 +388,9 @@ func validateInterfaceName(name, context string) error {
 	if name == "" {
 		return fmt.Errorf("%s name is empty", context)
 	}
-	if len(name) > maxInterfaceNameLength {
+	if len(name) > types.MaxInterfaceNameLength {
 		return fmt.Errorf("%s name %q exceeds maximum length of %d characters (got %d)",
-			context, name, maxInterfaceNameLength, len(name))
+			context, name, types.MaxInterfaceNameLength, len(name))
 	}
 	if name == "." || name == ".." {
 		return fmt.Errorf("%s name %q is reserved", context, name)

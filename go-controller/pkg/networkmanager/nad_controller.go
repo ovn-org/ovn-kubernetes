@@ -1583,12 +1583,11 @@ func (c *nadController) handleNetworkAnnotations(new util.MutableNetInfo, nad *n
 	}
 	if nad != nil && id == types.InvalidID {
 		// check what ID is currently annotated
-		if nad.Annotations[types.OvnNetworkIDAnnotation] != "" {
-			annotated := nad.Annotations[types.OvnNetworkIDAnnotation]
-			id, err = strconv.Atoi(annotated)
-			if err != nil {
-				return fmt.Errorf("failed to parse annotated network ID: %w", err)
-			}
+		id, err = util.GetAnnotatedNetworkID(nad)
+		if err != nil {
+			return err
+		}
+		if id != types.InvalidID {
 			klog.V(5).Infof("Previously annotated network ID %d found for NAD: %s/%s", id, nad.Namespace, nad.Name)
 		}
 	}

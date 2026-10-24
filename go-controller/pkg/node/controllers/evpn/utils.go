@@ -28,6 +28,7 @@ import (
 
 	utilnet "k8s.io/utils/net"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -61,7 +62,7 @@ func GetEVPNVXLANName(vtepName string, family utilnet.IPFamily) string {
 // is always hex, the two paths can never collide.
 func getEVPNVTEPDeviceName(vtepName, prefix string) string {
 	candidate := prefix + "-" + vtepName
-	if len(candidate) <= 15 {
+	if len(candidate) <= types.MaxInterfaceNameLength {
 		return candidate
 	}
 	h := sha256.Sum256([]byte(vtepName))
@@ -92,7 +93,7 @@ func getEVPNNetworkDeviceName(netInfo util.NetInfo, prefix string) string {
 	udnNamespace, udnName := util.ParseNetworkName(netInfo.GetNetworkName())
 	if udnName != "" && udnNamespace == "" {
 		candidate := prefix + "-" + udnName
-		if len(candidate) <= 15 {
+		if len(candidate) <= types.MaxInterfaceNameLength {
 			return candidate
 		}
 	}

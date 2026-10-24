@@ -950,6 +950,12 @@ install_metallb() {
     "tag: ${metallb_upstream_frr_image##*:}" \
     "tag: ${FRR_DEPLOYED_IMAGE##*:}"
 
+  # Install the dev-env python dependencies into a private venv: on distros
+  # with a PEP 668 externally-managed Python (e.g. Ubuntu 24.04+) a bare pip
+  # install into the system environment is rejected.
+  python3 -m venv "${builddir}/venv"
+  # shellcheck source=/dev/null
+  . "${builddir}/venv/bin/activate"
   pip install -r dev-env/requirements.txt
 
   local ip_family ipv6_network
@@ -976,6 +982,7 @@ install_metallb() {
   # backend.
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
   GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
+  deactivate
 
   align_metallb_pool_with_ip_family
 

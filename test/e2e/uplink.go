@@ -5091,10 +5091,7 @@ func ipv6LinkLocalFromMAC(mac string) string {
 	if err != nil || len(hw) != 6 {
 		return ""
 	}
-	return net.IP{
-		0xfe, 0x80, 0, 0, 0, 0, 0, 0,
-		hw[0] ^ 0x02, hw[1], hw[2], 0xff, 0xfe, hw[3], hw[4], hw[5],
-	}.String()
+	return util.HWAddrToIPv6LLA(hw).String()
 }
 
 func hasRouteInDefaultVRF(node corev1.Node, cidr string, nextHops ...string) (bool, error) {

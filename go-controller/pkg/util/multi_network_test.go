@@ -2019,6 +2019,95 @@ func TestSubnetOverlapCheck(t *testing.T) {
 	}
 }
 
+func TestGetAnnotatedNetworkID(t *testing.T) {
+	tests := []struct {
+		desc        string
+		annotations map[string]string
+		expectedID  int
+		expectError bool
+	}{
+		{
+			desc:       "missing annotation returns InvalidID without error",
+			expectedID: ovntypes.InvalidID,
+		},
+		{
+			desc:        "malformed annotation returns an error",
+			annotations: map[string]string{ovntypes.OvnNetworkIDAnnotation: "not-a-number"},
+			expectError: true,
+		},
+		{
+			desc:        "valid annotation",
+			annotations: map[string]string{ovntypes.OvnNetworkIDAnnotation: "7"},
+			expectedID:  7,
+		},
+		{
+			desc:        "zero, the default network ID",
+			annotations: map[string]string{ovntypes.OvnNetworkIDAnnotation: "0"},
+			expectedID:  0,
+		},
+		{
+			desc:        "negative annotation parses, indistinguishable from InvalidID",
+			annotations: map[string]string{ovntypes.OvnNetworkIDAnnotation: "-1"},
+			expectedID:  ovntypes.InvalidID,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			nad := applyNADDefaults(&nadv1.NetworkAttachmentDefinition{
+				ObjectMeta: metav1.ObjectMeta{Annotations: test.annotations},
+			})
+			id, err := GetAnnotatedNetworkID(nad)
+			if test.expectError {
+				g.Expect(err).To(gomega.HaveOccurred())
+				return
+			}
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+			g.Expect(id).To(gomega.Equal(test.expectedID))
+		})
+	}
+}
+
+func TestParseNADInfoNetworkIDAnnotation(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	const nadConfig = `
+        {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+            "netAttachDefName": "ns1/nad1"
+        }
+	`
+	newNAD := func(annotations map[string]string) *nadv1.NetworkAttachmentDefinition {
+		return applyNADDefaults(&nadv1.NetworkAttachmentDefinition{
+			ObjectMeta: metav1.ObjectMeta{Annotations: annotations},
+			Spec:       nadv1.NetworkAttachmentDefinitionSpec{Config: nadConfig},
+		})
+	}
+
+	t.Run("annotated network ID overrides the default", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := ParseNADInfo(newNAD(map[string]string{ovntypes.OvnNetworkIDAnnotation: "7"}))
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		g.Expect(netInfo.GetNetworkID()).To(gomega.Equal(7))
+	})
+
+	t.Run("missing annotation leaves InvalidID", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := ParseNADInfo(newNAD(nil))
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		g.Expect(netInfo.GetNetworkID()).To(gomega.Equal(ovntypes.InvalidID))
+	})
+
+	t.Run("malformed annotation fails the parse", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		_, err := ParseNADInfo(newNAD(map[string]string{ovntypes.OvnNetworkIDAnnotation: "not-a-number"}))
+		g.Expect(err).To(gomega.HaveOccurred())
+	})
+}
+
 func TestValidateNetConfOutboundSNAT(t *testing.T) {
 	tests := []struct {
 		name          string

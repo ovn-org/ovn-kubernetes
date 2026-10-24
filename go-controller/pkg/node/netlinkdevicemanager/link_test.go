@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/utils/ptr"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -572,6 +575,28 @@ var _ = Describe("Link", func() {
 		Entry("regular IPv6", net.ParseIP("2001:db8::1"), false),
 		Entry("regular IPv4", net.ParseIP("10.0.0.1"), false),
 		Entry("nil", nil, false),
+	)
+
+	DescribeTable("validateInterfaceName",
+		func(name string, valid bool) {
+			err := validateInterfaceName(name, "device")
+			if valid {
+				Expect(err).NotTo(HaveOccurred())
+			} else {
+				Expect(err).To(HaveOccurred())
+			}
+		},
+		Entry("empty name", "", false),
+		Entry("regular name", "br0", true),
+		Entry("name at the length limit (IFNAMSIZ-1)", strings.Repeat("a", types.MaxInterfaceNameLength), true),
+		Entry("name one character over the length limit", strings.Repeat("a", types.MaxInterfaceNameLength+1), false),
+		Entry("reserved name", ".", false),
+		Entry("reserved name (dot dot)", "..", false),
+		Entry("name with a slash", "br/0", false),
+		Entry("name with an embedded NUL", "br\x000", false),
+		Entry("name with whitespace", "br 0", false),
+		Entry("name with a tab", "br\t0", false),
+		Entry("name with a newline", "br\n0", false),
 	)
 
 })

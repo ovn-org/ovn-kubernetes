@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1253,15 +1252,18 @@ func (c *Controller) hasTrackedNamespaces(cudnName string) bool {
 // the default network and MaxNetworks bounds the allocator.
 func networkIDFromNADs(nads []netv1.NetworkAttachmentDefinition) int {
 	for i := range nads {
-		annotation := nads[i].Annotations[ovntypes.OvnNetworkIDAnnotation]
-		if annotation == "" {
-			continue
-		}
-		if id, err := strconv.Atoi(annotation); err == nil && id > ovntypes.DefaultNetworkID && id < networkmanager.MaxNetworks {
+		id, err := util.GetAnnotatedNetworkID(&nads[i])
+		switch {
+		case err != nil:
+			klog.Warningf("Ignoring NetworkAttachmentDefinition %s/%s: %v", nads[i].Namespace, nads[i].Name, err)
+		case id == ovntypes.InvalidID:
+			// no network-id annotation
+		case id > ovntypes.DefaultNetworkID && id < networkmanager.MaxNetworks:
 			return id
+		default:
+			klog.Warningf("Ignoring out-of-range network-id annotation %d on NetworkAttachmentDefinition %s/%s",
+				id, nads[i].Namespace, nads[i].Name)
 		}
-		klog.Warningf("Ignoring invalid network-id annotation %q on NetworkAttachmentDefinition %s/%s",
-			annotation, nads[i].Namespace, nads[i].Name)
 	}
 	return ovntypes.InvalidID
 }
