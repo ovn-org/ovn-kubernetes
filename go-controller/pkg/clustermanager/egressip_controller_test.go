@@ -2798,7 +2798,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should not be able to allocate conflicting compressed IP", func() {
+		ginkgo.It("should clean stale compressed IP allocation and assign successfully", func() {
 			app.Action = func(*cli.Context) error {
 				egressIP := "::feff:c0a8:8e32"
 				node1IPv4 := ""
@@ -2861,6 +2861,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
+				// Pre-populate cache with stale entries (bogus1/2/3 don't exist as EgressIP objects)
 				egressNode1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
 				egressNode2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
@@ -2868,7 +2869,11 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				fakeClusterManagerOVN.eIPC.nodeAllocator.cache[egressNode2.name] = &egressNode2
 
 				assignedStatuses := fakeClusterManagerOVN.eIPC.assignEgressIPs(eIP.Name, eIP.Spec.EgressIPs)
-				gomega.Expect(assignedStatuses).To(gomega.BeEmpty())
+
+				gomega.Expect(assignedStatuses).To(gomega.HaveLen(1))
+				gomega.Expect(assignedStatuses[0].Node).To(gomega.Equal(node2Name))
+				gomega.Expect(assignedStatuses[0].EgressIP).To(gomega.Equal(egressIP))
+
 				return nil
 			}
 
@@ -3707,6 +3712,127 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				gomega.Expect(fakeClusterManagerOVN.eIPC.reserveMark("another-egressip", assignedMark)).To(gomega.Succeed())
 				return nil
 			}
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		// Disabled: fake CNCC always overwrites CPIC status to match spec,
+		// so we cannot simulate a persistent spec/status node mismatch.
+		ginkgo.XIt("ensure egressIP is assigned when cloud private ip config has spec/status node mismatch", func() {
+			app.Action = func(*cli.Context) error {
+				config.Kubernetes.PlatformType = string(ocpconfigapi.AWSPlatformType)
+				node1IPv4 := "192.168.126.12/24"
+				node2IPv4 := "192.168.126.51/24"
+				egressIP := "192.168.126.101"
+
+				node1 := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Conditions: []corev1.NodeCondition{
+							{
+								Type:   corev1.NodeReady,
+								Status: corev1.ConditionTrue,
+							},
+						},
+					},
+				}
+
+				node2 := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\": [\"%s\",\"%s\"]}", v4NodeSubnet, v6NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Conditions: []corev1.NodeCondition{
+							{
+								Type:   corev1.NodeReady,
+								Status: corev1.ConditionTrue,
+							},
+						},
+					},
+				}
+
+				egressNode1 := setupNode(node1Name, []string{node1IPv4}, map[string]string{})
+				egressNode2 := setupNode(node2Name, []string{node2IPv4}, map[string]string{})
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+					},
+				}
+
+				// CPIC with spec/status node mismatch: controller wants node2, cloud has it on node1
+				cloudPrivateIPConfig := ocpcloudnetworkapi.CloudPrivateIPConfig{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: egressIP,
+						Annotations: map[string]string{
+							util.OVNEgressIPOwnerRefLabel: egressIPName,
+						},
+					},
+					Spec: ocpcloudnetworkapi.CloudPrivateIPConfigSpec{
+						Node: node2Name, // Controller wants this node
+					},
+					Status: ocpcloudnetworkapi.CloudPrivateIPConfigStatus{
+						Node: node1Name, // Cloud has it on this node (MISMATCH!)
+						Conditions: []metav1.Condition{
+							{
+								Status: metav1.ConditionTrue,
+								Type:   string(ocpcloudnetworkapi.Assigned),
+							},
+						},
+					},
+				}
+
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&ocpcloudnetworkapi.CloudPrivateIPConfigList{
+						Items: []ocpcloudnetworkapi.CloudPrivateIPConfig{cloudPrivateIPConfig},
+					},
+					&corev1.NodeList{
+						Items: []corev1.Node{node1, node2},
+					},
+				)
+
+				fakeClusterManagerOVN.eIPC.nodeAllocator.cache[egressNode1.name] = &egressNode1
+				fakeClusterManagerOVN.eIPC.nodeAllocator.cache[egressNode2.name] = &egressNode2
+
+				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeClusterManagerOVN.eIPC.WatchCloudPrivateIPConfig()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+				egressIPs, nodes := getEgressIPStatus(egressIPName)
+				gomega.Expect(nodes[0]).To(gomega.Equal(node1Name))
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
+
+				gomega.Expect(egressNode1.allocations).To(gomega.HaveKey(egressIP))
+				gomega.Expect(egressNode1.allocations[egressIP]).To(gomega.Equal(egressIPName))
+				gomega.Expect(egressNode2.allocations).NotTo(gomega.HaveKey(egressIP))
+
+				return nil
+			}
+
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
@@ -4703,16 +4829,18 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// eIP1 should keep its assignment (the IP was already assigned)
-				gomega.Eventually(getEgressIPStatusLen("egressip-1")).Should(gomega.Equal(1))
+				// eIP1 should keep its assignment (the IP was already assigned in status)
+				gomega.Eventually(getEgressIPStatusLen("egressip-1"), "2s").Should(gomega.Equal(1))
 				egressIPs1, nodes1 := getEgressIPStatus("egressip-1")
 				gomega.Expect(nodes1[0]).To(gomega.Equal(node1Name))
 				gomega.Expect(egressIPs1[0]).To(gomega.Equal(duplicateIP))
 
-				// eIP2 should NOT get the duplicate IP assigned (not even to node2) -
-				// it should remain unassigned because initEgressNodeReachability pre-populated the
-				// cache with eIP1's assignment
-				gomega.Eventually(getEgressIPStatusLen("egressip-2")).Should(gomega.Equal(0))
+				// eIP2 must NOT get the IP: eIP1 exists and legitimately owns it (not stale)
+				gomega.Consistently(getEgressIPStatusLen("egressip-2"), "2s").Should(gomega.Equal(0))
+
+				egressIPs1, nodes1 = getEgressIPStatus("egressip-1")
+				gomega.Expect(nodes1[0]).To(gomega.Equal(node1Name))
+				gomega.Expect(egressIPs1[0]).To(gomega.Equal(duplicateIP))
 
 				return nil
 			}
