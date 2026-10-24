@@ -204,6 +204,8 @@ nav:
       - Route Advertisements: features/bgp-integration/route-advertisements.md
       - No-Overlay Mode: features/bgp-integration/no-overlay.md
       - EVPN: features/bgp-integration/evpn.md
+  - Operations:
+    - Migrating from Central Mode to Interconnect Mode: installation/migrating-central-to-interconnect.md
   - Troubleshooting:
     - troubleshooting/index.md
     - Introduction: troubleshooting/debugging.md
