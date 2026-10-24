@@ -146,6 +146,75 @@ var _ = ginkgo.Describe("Egress Firewall External DNS Operations", func() {
 			gomega.Eventually(checkAddrSets).Should(gomega.BeZero())
 		})
 
+		ginkgo.It("recreates address set when it was deleted externally", func() {
+			var err error
+			nbClient, testdbCtx, err = libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{}, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to create NB test harness")
+			defer testdbCtx.Cleanup()
+
+			config.IPv4Mode = true
+			config.IPv6Mode = false
+
+			start()
+
+			ovnFactory := addressset.NewOvnAddressSetFactory(nbClient, true, false)
+			tracker := newDNSTracker(ovnFactory, DefaultNetworkControllerName, false)
+
+			testDNSName := "api.github.com."
+			testNamespace := "test-ns"
+			initialAddresses := []string{"140.82.121.5", "140.82.121.6"}
+
+			err = tracker.addOrUpdateDNSName(testDNSName, initialAddresses)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to add initial DNS name to tracker")
+
+			_, err = tracker.addNamespace(testNamespace, testDNSName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to add namespace reference")
+
+			resolvedName, exists := tracker.dnsNames[testDNSName]
+			gomega.Expect(exists).To(gomega.BeTrue())
+			v4Addrs, _ := resolvedName.dnsAddressSet.GetAddresses()
+			gomega.Expect(v4Addrs).To(gomega.ConsistOf(initialAddresses))
+
+			predicateIDs := libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetEgressFirewallDNS, DefaultNetworkControllerName, nil)
+			predicate := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, nil)
+			addrSets, err := libovsdbops.FindAddressSetsWithPredicate(nbClient, predicate)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to find address sets before deletion")
+			gomega.Expect(addrSets).NotTo(gomega.BeEmpty())
+			err = libovsdbops.DeleteAddressSets(nbClient, addrSets...)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to delete address sets from NBDB")
+
+			addrSets, err = libovsdbops.FindAddressSetsWithPredicate(nbClient, predicate)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to verify address sets were deleted")
+			gomega.Expect(addrSets).To(gomega.BeEmpty())
+
+			newAddresses := []string{"140.82.121.7", "140.82.121.8"}
+			err = tracker.addOrUpdateDNSName(testDNSName, newAddresses)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to recreate address set after deletion")
+
+			resolvedName, exists = tracker.dnsNames[testDNSName]
+			gomega.Expect(exists).To(gomega.BeTrue())
+			v4Addrs, _ = resolvedName.dnsAddressSet.GetAddresses()
+			gomega.Expect(v4Addrs).To(gomega.ConsistOf(newAddresses))
+			gomega.Expect(resolvedName.namespaces.Has(testNamespace)).To(gomega.BeTrue(),
+				"namespace reference lost during address set recovery")
+
+			addrSets, err = libovsdbops.FindAddressSetsWithPredicate(nbClient, predicate)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to find recreated address set in NBDB")
+			gomega.Expect(addrSets).NotTo(gomega.BeEmpty())
+
+			err = tracker.deleteDNSName(testDNSName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to call deleteDNSName after recovery")
+			resolvedName, exists = tracker.dnsNames[testDNSName]
+			gomega.Expect(exists).To(gomega.BeTrue(),
+				"address set removed despite active namespace reference")
+			gomega.Expect(resolvedName.deleted).To(gomega.BeTrue())
+
+			addrSets, err = libovsdbops.FindAddressSetsWithPredicate(nbClient, predicate)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to verify address set retained after deleteDNSName")
+			gomega.Expect(addrSets).NotTo(gomega.BeEmpty(),
+				"address set should still exist in NBDB when namespace references it")
+		})
+
 	})
 
 	ginkgo.Context("on dns name resolver resource creation", func() {

@@ -4,6 +4,7 @@
 package dnsnameresolver
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -96,7 +97,27 @@ func (dnsTracker *dnsTracker) addOrUpdateDNSName(dnsName string, addresses []str
 	}
 
 	if err := resolvedName.dnsAddressSet.SetAddresses(addresses); err != nil {
-		return fmt.Errorf("cannot add IPs to AddressSet for DNS name %s: %v", dnsName, err)
+		if !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return fmt.Errorf("cannot add IPs to AddressSet for DNS name %s: %v", dnsName, err)
+		}
+		// The address set was deleted externally (e.g. by stale address set
+		// cleanup running before ACLs referencing it were recreated). Remove
+		// the stale tracker entry and recreate the address set. The recreated
+		// address set uses the same deterministic hash name, so existing ACLs
+		// that reference it will work once the set is repopulated.
+		klog.Warningf("AddressSet for DNS name %s was not found in OVN NBDB, recreating", dnsName)
+		staleEntry := resolvedName
+		delete(dnsTracker.dnsNames, dnsName)
+		resolvedName, err = dnsTracker.ensureResolvedName(dnsName)
+		if err != nil {
+			dnsTracker.dnsNames[dnsName] = staleEntry
+			return fmt.Errorf("cannot recreate AddressSet for DNS name %s: %v", dnsName, err)
+		}
+		resolvedName.namespaces = staleEntry.namespaces
+		resolvedName.deleted = staleEntry.deleted
+		if err := resolvedName.dnsAddressSet.SetAddresses(addresses); err != nil {
+			return fmt.Errorf("cannot add IPs to recreated AddressSet for DNS name %s: %v", dnsName, err)
+		}
 	}
 
 	return nil
