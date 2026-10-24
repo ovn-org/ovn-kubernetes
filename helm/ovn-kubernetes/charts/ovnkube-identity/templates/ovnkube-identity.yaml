@@ -70,6 +70,8 @@ spec:
                 name: ovn-config
           - name: OVNKUBE_LOGLEVEL
             value: {{ default 4 .Values.logLevel | quote }}
+          - name: OVN_ENABLE_INTERCONNECT
+            value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
           - name: OVN_HYBRID_OVERLAY_ENABLE
             value: {{ default "" .Values.global.enableHybridOverlay | quote }}
       volumes:
