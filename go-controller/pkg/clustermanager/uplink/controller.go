@@ -1174,8 +1174,15 @@ func uplinkNeedsUpdate(oldObj, newObj *uplinkv1alpha1.Uplink) bool {
 	if oldObj == nil {
 		return true
 	}
+	// A status write can reach the informer after a newer reconcile skipped
+	// an update against stale cached readiness. Observe our condition so that
+	// delayed status event triggers a corrective reconcile.
 	return !reflect.DeepEqual(oldObj.Spec, newObj.Spec) ||
-		oldObj.DeletionTimestamp.IsZero() != newObj.DeletionTimestamp.IsZero()
+		oldObj.DeletionTimestamp.IsZero() != newObj.DeletionTimestamp.IsZero() ||
+		!reflect.DeepEqual(
+			meta.FindStatusCondition(oldObj.Status.Conditions, uplinkv1alpha1.UplinkConditionReady),
+			meta.FindStatusCondition(newObj.Status.Conditions, uplinkv1alpha1.UplinkConditionReady),
+		)
 }
 
 func uplinkStateNeedsUpdate(oldObj, newObj *uplinkv1alpha1.UplinkState) bool {
@@ -1193,8 +1200,14 @@ func cudnNeedsUpdate(oldObj, newObj *udnv1.ClusterUserDefinedNetwork) bool {
 	if newObj == nil {
 		return true
 	}
+	// As with Uplink readiness, reconcile delayed updates to our condition
+	// without reacting to conditions owned by other controllers.
 	return !reflect.DeepEqual(oldObj.Spec.Uplinks, newObj.Spec.Uplinks) ||
-		oldObj.DeletionTimestamp.IsZero() != newObj.DeletionTimestamp.IsZero()
+		oldObj.DeletionTimestamp.IsZero() != newObj.DeletionTimestamp.IsZero() ||
+		!reflect.DeepEqual(
+			meta.FindStatusCondition(oldObj.Status.Conditions, conditionTypeUplinksReady),
+			meta.FindStatusCondition(newObj.Status.Conditions, conditionTypeUplinksReady),
+		)
 }
 
 func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
