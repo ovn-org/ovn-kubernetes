@@ -840,16 +840,29 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 			v4Subnet = hostSubnet
 		}
 		if config.Gateway.Mode == config.GatewayModeLocal {
-			lrsr := nbdb.LogicalRouterStaticRoute{
+			// Pod egress leaves by the management port, putting the host kernel
+			// in the egress path. Where the cluster router only carries the
+			// local zone's subnets, a single default route covers every pod in
+			// the zone; see usesDefaultEgressRoute.
+			srcRoute := nbdb.LogicalRouterStaticRoute{
 				Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
 				IPPrefix: hostSubnet.String(),
 				Nexthop:  mgmtIfAddr.IP.String(),
 			}
+			lrsr := srcRoute
+			if usesDefaultEgressRoute(bnc.GetNetInfo()) {
+				lrsr = nbdb.LogicalRouterStaticRoute{
+					IPPrefix: defaultRoutePrefix(mgmtIfAddr.IP),
+					Nexthop:  mgmtIfAddr.IP.String(),
+				}
+			}
 			if bnc.IsUserDefinedNetwork() {
-				lrsr.ExternalIDs = map[string]string{
+				externalIDs := map[string]string{
 					types.NetworkExternalID:  bnc.GetNetworkName(),
 					types.TopologyExternalID: bnc.TopologyType(),
 				}
+				lrsr.ExternalIDs = externalIDs
+				srcRoute.ExternalIDs = externalIDs
 			}
 			p := func(item *nbdb.LogicalRouterStaticRoute) bool {
 				return item.IPPrefix == lrsr.IPPrefix && libovsdbops.PolicyEqualPredicate(lrsr.Policy, item.Policy)
@@ -858,6 +871,21 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 				&lrsr, p, &lrsr.Nexthop)
 			if err != nil {
 				return nil, fmt.Errorf("error creating static route %+v on router %s: %v", lrsr, routerName, err)
+			}
+			if usesDefaultEgressRoute(bnc.GetNetInfo()) {
+				// The src-ip route for this node subnet is superseded by the
+				// default route. Remove any instance left behind by a previous
+				// version: being more specific, it keeps outranking dst-ip
+				// routes to remote node subnets.
+				stale := func(item *nbdb.LogicalRouterStaticRoute) bool {
+					return item.IPPrefix == srcRoute.IPPrefix &&
+						libovsdbops.PolicyEqualPredicate(srcRoute.Policy, item.Policy)
+				}
+				if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(bnc.nbClient,
+					routerName, stale); err != nil {
+					return nil, fmt.Errorf("error deleting superseded static route for %s on router %s: %v",
+						srcRoute.IPPrefix, routerName, err)
+				}
 			}
 		}
 	}
