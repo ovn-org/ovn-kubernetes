@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corev1informers "k8s.io/client-go/informers/core/v1"
 	corev1listers "k8s.io/client-go/listers/core/v1"
@@ -195,7 +196,7 @@ type BridgeEIPAddrManager struct {
 // BridgeEIPAddrManager must be able to force Openflow manager to resync if EgressIP assignment for the node changes.
 func NewBridgeEIPAddrManager(nodeName, bridgeName string, linkManager *linkmanager.Controller,
 	kube kube.Interface, eIPInformer egressipinformers.EgressIPInformer, nodeInformer corev1informers.NodeInformer) *BridgeEIPAddrManager {
-	return &BridgeEIPAddrManager{
+	mgr := &BridgeEIPAddrManager{
 		nodeName:         nodeName,     // k8 node name
 		bridgeName:       bridgeName,   // bridge name for which EIP IPs are managed
 		nodeAnnotationMu: sync.Mutex{}, // mu for updating Node annotation
@@ -207,6 +208,17 @@ func NewBridgeEIPAddrManager(nodeName, bridgeName string, linkManager *linkmanag
 		addrManager:      linkManager,
 		cache:            NewMarkIPsCache(), // cache to store pkt mark -> EIP IP.
 	}
+
+	_, err := nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(old, cur interface{}) {
+			mgr.handleNodeLabelRemoval(old, cur)
+		},
+	})
+	if err != nil {
+		klog.Errorf("Failed to add node event handler for EgressIP label removal: %v", err)
+	}
+
+	return mgr
 }
 
 func (g *BridgeEIPAddrManager) GetCache() *MarkIPsCache {
@@ -426,6 +438,72 @@ func (g *BridgeEIPAddrManager) deleteIPBridge(ip net.IP) error {
 		return fmt.Errorf("failed to get link obj by name %s: %v", g.bridgeName, err)
 	}
 	return g.addrManager.DelAddress(*egressip.GetNetlinkAddress(ip, link.Attrs().Index))
+}
+
+// handleNodeLabelRemoval watches for the egress-assignable label being removed
+// from this node. When detected, it immediately removes all EgressIP addresses
+// from br-ex so this node stops responding to ARP before the cluster manager
+// reassigns the EgressIPs to another node. This prevents the ARP conflict that
+// occurs when both old and new nodes claim the same IP simultaneously.
+//
+// Only the IP is removed from the interface — the link manager store is left
+// intact so that its periodic sync can re-add the addresses if the label
+// removal was accidental (removed and re-added quickly).
+func (g *BridgeEIPAddrManager) handleNodeLabelRemoval(old, cur interface{}) {
+	oldNode, ok := old.(*corev1.Node)
+	if !ok {
+		return
+	}
+	newNode, ok := cur.(*corev1.Node)
+	if !ok {
+		return
+	}
+	if newNode.Name != g.nodeName {
+		return
+	}
+	_, oldHasLabel := oldNode.Labels[util.GetNodeEgressLabel()]
+	_, newHasLabel := newNode.Labels[util.GetNodeEgressLabel()]
+	if !oldHasLabel || newHasLabel {
+		return
+	}
+	klog.Infof("Egress-assignable label removed from node %s, preemptively removing EgressIP addresses from bridge %s",
+		g.nodeName, g.bridgeName)
+	g.preemptiveEgressIPCleanup()
+}
+
+// preemptiveEgressIPCleanup removes all EgressIP addresses from the bridge
+// interface using direct netlink AddrDel. It intentionally bypasses the link
+// manager's DelAddress to preserve the link manager's store — if the label
+// removal was accidental, the link manager's periodic sync (every 2 min) will
+// re-add the addresses. For a real failover, the normal EgressIP handler will
+// later call deleteIPBridge which properly cleans up the store.
+func (g *BridgeEIPAddrManager) preemptiveEgressIPCleanup() {
+	link, err := util.GetNetLinkOps().LinkByName(g.bridgeName)
+	if err != nil {
+		klog.Errorf("Failed to get bridge %s for preemptive EgressIP cleanup: %v", g.bridgeName, err)
+		return
+	}
+
+	for _, ipStr := range g.cache.GetIPv4() {
+		if ip := net.ParseIP(ipStr); ip != nil {
+			addr := egressip.GetNetlinkAddress(ip, link.Attrs().Index)
+			if err := util.GetNetLinkOps().AddrDel(link, addr); err != nil {
+				klog.V(4).Infof("Preemptive removal of EgressIP %s from bridge %s: %v", ip, g.bridgeName, err)
+			} else {
+				klog.Infof("Preemptively removed EgressIP %s from bridge %s", ip, g.bridgeName)
+			}
+		}
+	}
+	for _, ipStr := range g.cache.GetIPv6() {
+		if ip := net.ParseIP(ipStr); ip != nil {
+			addr := egressip.GetNetlinkAddress(ip, link.Attrs().Index)
+			if err := util.GetNetLinkOps().AddrDel(link, addr); err != nil {
+				klog.V(4).Infof("Preemptive removal of EgressIP %s from bridge %s: %v", ip, g.bridgeName, err)
+			} else {
+				klog.Infof("Preemptively removed EgressIP %s from bridge %s", ip, g.bridgeName)
+			}
+		}
+	}
 }
 
 // getAnnotationIPs retrieves the egress IP annotation from the current node Nodes object. If multiple users, callers must synchronise.

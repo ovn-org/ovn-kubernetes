@@ -401,6 +401,204 @@ var _ = ginkgo.Describe("Gateway EgressIP", func() {
 				egressip.GetNetlinkAddress(net.ParseIP(ipV4Addr), bridgeLinkIndex))).Should(gomega.BeTrue(), "should add valid OVN IP to bridge")
 		})
 	})
+
+	ginkgo.Context("egress-assignable label removal", func() {
+		ginkgo.It("should preemptively remove EgressIPs from bridge when label is removed", func() {
+			// Setup: Create node with label and EgressIP configured
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						util.GetNodeEgressLabel(): "",
+					},
+					Annotations: map[string]string{
+						util.OVNNodeBridgeEgressIPs: toJSONArrayOfStrings(ipV4Addr, ipV4Addr2),
+						util.OvnNodeIfAddr:          `{"ipv4":"192.168.1.10/24"}`,
+					},
+				},
+			}
+			client := fake.NewSimpleClientset(node)
+			watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, nodeName)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			gomega.Expect(watchFactory.Start()).Should(gomega.Succeed())
+			defer watchFactory.Shutdown()
+
+			linkManager := linkmanager.NewController(nodeName, true, true, nil)
+
+			// Setup netlink mocks
+			nlLinkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: bridgeName, Index: bridgeLinkIndex})
+			nlMock.On("LinkByName", bridgeName).Return(nlLinkMock, nil)
+
+			// Expect AddrDel to be called for both IPs
+			nlMock.On("AddrDel", nlLinkMock, egressip.GetNetlinkAddress(net.ParseIP(ipV4Addr), bridgeLinkIndex)).Return(nil).Once()
+			nlMock.On("AddrDel", nlLinkMock, egressip.GetNetlinkAddress(net.ParseIP(ipV4Addr2), bridgeLinkIndex)).Return(nil).Once()
+
+			addrMgr := NewBridgeEIPAddrManager(nodeName, bridgeName, linkManager, &kube.Kube{KClient: client},
+				watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+
+			// Add IPs to cache as if they were assigned
+			addrMgr.cache.insertMarkIP(util.EgressIPMark(50000), net.ParseIP(ipV4Addr))
+			addrMgr.cache.insertMarkIP(util.EgressIPMark(50001), net.ParseIP(ipV4Addr2))
+
+			// Simulate label removal by updating the node
+			updatedNode := node.DeepCopy()
+			delete(updatedNode.Labels, util.GetNodeEgressLabel())
+			_, err = client.CoreV1().Nodes().Update(nil, updatedNode, metav1.UpdateOptions{})
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			// Wait for the event handler to process
+			gomega.Eventually(func() bool {
+				return nlMock.AssertCalled(ginkgo.GinkgoT(), "AddrDel", nlLinkMock,
+					egressip.GetNetlinkAddress(net.ParseIP(ipV4Addr), bridgeLinkIndex))
+			}, "2s").Should(gomega.BeTrue(), "should remove IPv4 address from bridge")
+
+			gomega.Eventually(func() bool {
+				return nlMock.AssertCalled(ginkgo.GinkgoT(), "AddrDel", nlLinkMock,
+					egressip.GetNetlinkAddress(net.ParseIP(ipV4Addr2), bridgeLinkIndex))
+			}, "2s").Should(gomega.BeTrue(), "should remove second IPv4 address from bridge")
+		})
+
+		ginkgo.It("should not remove IPs when label is added", func() {
+			// Setup: Node without label
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						util.OvnNodeIfAddr: `{"ipv4":"192.168.1.10/24"}`,
+					},
+				},
+			}
+			client := fake.NewSimpleClientset(node)
+			watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, nodeName)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			gomega.Expect(watchFactory.Start()).Should(gomega.Succeed())
+			defer watchFactory.Shutdown()
+
+			linkManager := linkmanager.NewController(nodeName, true, true, nil)
+
+			// Setup netlink mocks - AddrDel should NOT be called
+			nlLinkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: bridgeName, Index: bridgeLinkIndex})
+			nlMock.On("LinkByName", bridgeName).Return(nlLinkMock, nil)
+
+			addrMgr := NewBridgeEIPAddrManager(nodeName, bridgeName, linkManager, &kube.Kube{KClient: client},
+				watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+
+			addrMgr.cache.insertMarkIP(util.EgressIPMark(50000), net.ParseIP(ipV4Addr))
+
+			// Simulate label addition
+			updatedNode := node.DeepCopy()
+			updatedNode.Labels = map[string]string{util.GetNodeEgressLabel(): ""}
+			_, err = client.CoreV1().Nodes().Update(nil, updatedNode, metav1.UpdateOptions{})
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			// AddrDel should NOT be called
+			gomega.Consistently(func() bool {
+				return nlMock.AssertNotCalled(ginkgo.GinkgoT(), "AddrDel")
+			}, "1s").Should(gomega.BeTrue(), "should not remove IPs when label is added")
+		})
+
+		ginkgo.It("should not remove IPs for different node", func() {
+			// Setup: Create two nodes
+			node1 := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						util.GetNodeEgressLabel(): "",
+					},
+					Annotations: map[string]string{
+						util.OvnNodeIfAddr: `{"ipv4":"192.168.1.10/24"}`,
+					},
+				},
+			}
+			node2 := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ovn-worker2",
+					Labels: map[string]string{
+						util.GetNodeEgressLabel(): "",
+					},
+					Annotations: map[string]string{
+						util.OvnNodeIfAddr: `{"ipv4":"192.168.1.11/24"}`,
+					},
+				},
+			}
+			client := fake.NewSimpleClientset(node1, node2)
+			watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, nodeName)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			gomega.Expect(watchFactory.Start()).Should(gomega.Succeed())
+			defer watchFactory.Shutdown()
+
+			linkManager := linkmanager.NewController(nodeName, true, true, nil)
+
+			nlLinkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: bridgeName, Index: bridgeLinkIndex})
+			nlMock.On("LinkByName", bridgeName).Return(nlLinkMock, nil)
+
+			addrMgr := NewBridgeEIPAddrManager(nodeName, bridgeName, linkManager, &kube.Kube{KClient: client},
+				watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+
+			// Remove label from node2 (different node)
+			updatedNode2 := node2.DeepCopy()
+			delete(updatedNode2.Labels, util.GetNodeEgressLabel())
+			_, err = client.CoreV1().Nodes().Update(nil, updatedNode2, metav1.UpdateOptions{})
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			// AddrDel should NOT be called for our node
+			gomega.Consistently(func() bool {
+				return nlMock.AssertNotCalled(ginkgo.GinkgoT(), "AddrDel")
+			}, "1s").Should(gomega.BeTrue(), "should not remove IPs when different node's label is removed")
+		})
+
+		ginkgo.It("should handle IPv6 EgressIP removal", func() {
+			ipV6Addr := "fd00::1"
+			ipV6Addr2 := "fd00::2"
+
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Labels: map[string]string{
+						util.GetNodeEgressLabel(): "",
+					},
+					Annotations: map[string]string{
+						util.OVNNodeBridgeEgressIPs: toJSONArrayOfStrings(ipV6Addr, ipV6Addr2),
+						util.OvnNodeIfAddr:          `{"ipv6":"fd00::10/64"}`,
+					},
+				},
+			}
+			client := fake.NewSimpleClientset(node)
+			watchFactory, err := factory.NewNodeWatchFactory(&util.OVNNodeClientset{KubeClient: client}, nodeName)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			gomega.Expect(watchFactory.Start()).Should(gomega.Succeed())
+			defer watchFactory.Shutdown()
+
+			linkManager := linkmanager.NewController(nodeName, true, true, nil)
+
+			nlLinkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: bridgeName, Index: bridgeLinkIndex})
+			nlMock.On("LinkByName", bridgeName).Return(nlLinkMock, nil)
+			nlMock.On("AddrDel", nlLinkMock, egressip.GetNetlinkAddress(net.ParseIP(ipV6Addr), bridgeLinkIndex)).Return(nil).Once()
+			nlMock.On("AddrDel", nlLinkMock, egressip.GetNetlinkAddress(net.ParseIP(ipV6Addr2), bridgeLinkIndex)).Return(nil).Once()
+
+			addrMgr := NewBridgeEIPAddrManager(nodeName, bridgeName, linkManager, &kube.Kube{KClient: client},
+				watchFactory.EgressIPInformer(), watchFactory.NodeCoreInformer())
+
+			addrMgr.cache.insertMarkIP(util.EgressIPMark(60000), net.ParseIP(ipV6Addr))
+			addrMgr.cache.insertMarkIP(util.EgressIPMark(60001), net.ParseIP(ipV6Addr2))
+
+			// Remove label
+			updatedNode := node.DeepCopy()
+			delete(updatedNode.Labels, util.GetNodeEgressLabel())
+			_, err = client.CoreV1().Nodes().Update(nil, updatedNode, metav1.UpdateOptions{})
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			gomega.Eventually(func() bool {
+				return nlMock.AssertCalled(ginkgo.GinkgoT(), "AddrDel", nlLinkMock,
+					egressip.GetNetlinkAddress(net.ParseIP(ipV6Addr), bridgeLinkIndex))
+			}, "2s").Should(gomega.BeTrue(), "should remove first IPv6 address from bridge")
+
+			gomega.Eventually(func() bool {
+				return nlMock.AssertCalled(ginkgo.GinkgoT(), "AddrDel", nlLinkMock,
+					egressip.GetNetlinkAddress(net.ParseIP(ipV6Addr2), bridgeLinkIndex))
+			}, "2s").Should(gomega.BeTrue(), "should remove second IPv6 address from bridge")
+		})
+	})
 })
 
 func initBridgeEIPAddrManager(nodeName, bridgeName string, bridgeEIPAnnot string) (*BridgeEIPAddrManager, func()) {
@@ -509,3 +707,4 @@ func parseEIPsFromAnnotation(node *corev1.Node) []string {
 	}
 	return ips
 }
+

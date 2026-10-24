@@ -1121,6 +1121,19 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		h.oc.eIPC.nodeState.Store(newNode.Name, struct{}{})
 		h.oc.eIPC.nodeState.UnlockKey(newNode.Name)
 
+		// When the egress-assignable label is removed from a local zone node,
+		// preemptively remove EgressIP SNAT rules from the GW router so this
+		// node stops handling EgressIP traffic before the cluster manager
+		// reassigns the EgressIPs to another node.
+		_, oldHasLabel := oldNode.Labels[util.GetNodeEgressLabel()]
+		_, newHasLabel := newNode.Labels[util.GetNodeEgressLabel()]
+		if oldHasLabel && !newHasLabel && h.oc.isLocalNode(newNode) {
+			klog.Infof("Egress-assignable label removed from node %s, preemptively removing EgressIP SNAT rules from GW router", newNode.Name)
+			if err := h.oc.eIPC.preemptiveEgressNodeCleanup(newNode.Name); err != nil {
+				return err
+			}
+		}
+
 		_, rerouteRetryPending := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
 		newNodeIsLocal := h.oc.isLocalNode(newNode)
 

@@ -2559,6 +2559,35 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 	return nil
 }
 
+// preemptiveEgressNodeCleanup removes all EgressIP SNAT NATs from the GW router
+// for the given node. Called when the egress-assignable label is removed so this
+// node stops SNAT'ing traffic before the cluster manager reassigns the EgressIPs
+// to another node. The normal reconciliation path will also clean these up when
+// the EgressIP status changes — this just closes the race window.
+// Returns an error if cleanup fails so the retry framework can retry.
+func (e *EgressIPController) preemptiveEgressNodeCleanup(nodeName string) error {
+	ni := e.networkManager.GetNetwork(types.DefaultNetworkName)
+	logicalPort := ni.GetNetworkScopedK8sMgmtIntfName(nodeName)
+	natPred := func(nat *nbdb.NAT) bool {
+		return nat.ExternalIDs[libovsdbops.OwnerTypeKey.String()] == string(libovsdbops.EgressIPOwnerType) &&
+			nat.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == e.controllerName &&
+			nat.LogicalPort != nil && *nat.LogicalPort == logicalPort
+	}
+	ops, err := libovsdbops.DeleteNATsWithPredicateOps(e.nbClient, nil, natPred)
+	if err != nil {
+		klog.Errorf("Failed to build delete ops for EgressIP SNAT rules on node %s: %v", nodeName, err)
+		return fmt.Errorf("failed to build delete ops for EgressIP SNAT rules on node %s: %w", nodeName, err)
+	}
+	if len(ops) > 0 {
+		if _, err = libovsdbops.TransactAndCheck(e.nbClient, ops); err != nil {
+			klog.Errorf("Failed to delete EgressIP SNAT rules from GW router for node %s: %v", nodeName, err)
+			return fmt.Errorf("failed to delete EgressIP SNAT rules from GW router for node %s: %w", nodeName, err)
+		}
+		klog.Infof("Preemptively removed EgressIP SNAT rules from GW router for node %s", nodeName)
+	}
+	return nil
+}
+
 // initClusterEgressPolicies will initialize the default allow policies for
 // east<->west traffic. Egress IP is based on routing egress traffic to specific
 // egress nodes, we don't want to route any other traffic however and these
