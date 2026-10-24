@@ -2798,7 +2798,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should not be able to allocate conflicting compressed IP", func() {
+		ginkgo.It("should clean stale compressed IP allocation and assign successfully", func() {
 			app.Action = func(*cli.Context) error {
 				egressIP := "::feff:c0a8:8e32"
 				node1IPv4 := ""
@@ -2861,6 +2861,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
 				)
 
+				// Pre-populate cache with stale entries (bogus1/2/3 don't exist as EgressIP objects)
 				egressNode1 := setupNode(node1Name, []string{"0:0:0:0:0:feff:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e32": "bogus1", "0:0:0:0:0:feff:c0a8:8e1e": "bogus2"})
 				egressNode2 := setupNode(node2Name, []string{"0:0:0:0:0:fedf:c0a8:8e0c/64"}, map[string]string{"0:0:0:0:0:feff:c0a8:8e23": "bogus3"})
 
@@ -2868,7 +2869,11 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				fakeClusterManagerOVN.eIPC.nodeAllocator.cache[egressNode2.name] = &egressNode2
 
 				assignedStatuses := fakeClusterManagerOVN.eIPC.assignEgressIPs(eIP.Name, eIP.Spec.EgressIPs)
-				gomega.Expect(assignedStatuses).To(gomega.BeEmpty())
+
+				gomega.Expect(assignedStatuses).To(gomega.HaveLen(1))
+				gomega.Expect(assignedStatuses[0].Node).To(gomega.Equal(node2Name))
+				gomega.Expect(assignedStatuses[0].EgressIP).To(gomega.Equal(egressIP))
+
 				return nil
 			}
 
@@ -4921,6 +4926,82 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				markInCache, _, err := fakeClusterManagerOVN.eIPC.getOrAllocMark(egressIPName)
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 				gomega.Expect(markAfterUpdate).Should(gomega.Equal(fmt.Sprintf("%d", markInCache)))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
+	ginkgo.Context("DeleteEgressIP for IPv4", func() {
+
+		ginkgo.It("Scenario 1: should clean cache on simple EgressIP deletion", func() {
+			app.Action = func(*cli.Context) error {
+				egressIP := "192.168.126.101"
+				node1IPv4 := "192.168.126.12/24"
+
+				node1 := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Conditions: []corev1.NodeCondition{
+							{
+								Type:   corev1.NodeReady,
+								Status: corev1.ConditionTrue,
+							},
+						},
+					},
+				}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+					},
+				}
+
+				fakeClusterManagerOVN.start(
+					&corev1.NodeList{Items: []corev1.Node{node1}},
+					&egressipv1.EgressIPList{Items: []egressipv1.EgressIP{eIP}},
+				)
+
+				_, err := fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Verify EgressIP is allocated to node1
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+				egressIPs, nodes := getEgressIPStatus(egressIPName)
+				gomega.Expect(nodes[0]).To(gomega.Equal(node1Name))
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
+
+				// Verify cache has entry for the allocated IP
+				gomega.Eventually(func() bool {
+					allocations := readAllocations(node1Name)
+					_, exists := allocations[egressIP]
+					return exists
+				}).Should(gomega.BeTrue(), "Expected cache to contain allocated IP before deletion")
+
+				// Delete the EgressIP
+				err = fakeClusterManagerOVN.fakeClient.EgressIPClient.K8sV1().EgressIPs().Delete(context.TODO(), egressIPName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Verify cache is cleaned after deletion
+				gomega.Eventually(func() bool {
+					allocations := readAllocations(node1Name)
+					_, exists := allocations[egressIP]
+					return exists
+				}).Should(gomega.BeFalse(), "Expected cache to be cleaned after deletion, but IP allocation still exists")
+
 				return nil
 			}
 
