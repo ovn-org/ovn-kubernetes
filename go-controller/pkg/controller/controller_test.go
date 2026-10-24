@@ -271,6 +271,49 @@ var _ = Describe("Level-driven controller deletedObj", func() {
 	})
 })
 
+var _ = Describe("Level-driven controller onDelete tombstone enqueue", func() {
+	var (
+		stopChan         chan struct{}
+		reconcileCounter atomic.Uint64
+		ctrl             Controller
+	)
+
+	startNodeController := func(config *ControllerConfig[corev1.Node], objects ...runtime.Object) {
+		fakeClient := util.GetOVNClientset(objects...).GetClusterManagerClientset()
+		coreFactory := informerfactory.NewSharedInformerFactory(fakeClient.KubeClient, time.Second)
+		config.Informer = coreFactory.Core().V1().Nodes().Informer()
+		config.Lister = coreFactory.Core().V1().Nodes().Lister().List
+		if config.RateLimiter == nil {
+			config.RateLimiter = workqueue.NewTypedItemExponentialFailureRateLimiter[string](100*time.Millisecond, 1*time.Second)
+		}
+		ctrl = NewController("controller-name", config)
+		coreFactory.Start(stopChan)
+		err := StartWithInitialSync(nil, ctrl)
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	BeforeEach(func() {
+		reconcileCounter.Store(0)
+		stopChan = make(chan struct{})
+	})
+
+	AfterEach(func() {
+		close(stopChan)
+		Stop(ctrl)
+	})
+
+	It("enqueues reconcile for DeletedFinalStateUnknown delete events", func() {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-a"}}
+		config := getDefaultConfig[corev1.Node](&reconcileCounter)
+		startNodeController(config, node)
+		Eventually(reconcileCounter.Load).Should(BeEquivalentTo(1))
+
+		cc := ctrl.(*controller[corev1.Node])
+		cc.onDelete(cache.DeletedFinalStateUnknown{Key: node.Name, Obj: node})
+		Eventually(reconcileCounter.Load).Should(BeEquivalentTo(2))
+	})
+})
+
 var _ = Describe("Level-driven controllers with shared initialSync", func() {
 	var (
 		fakeClient          *util.OVNClusterManagerClientset
