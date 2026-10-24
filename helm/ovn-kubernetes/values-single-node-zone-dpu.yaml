@@ -103,6 +103,8 @@ global:
   enableSvcTemplate: false
   # -- Enables metrics related to scaling
   enableMetricsScale: ""
+  # -- Interval in seconds at which OVS/OVN metrics are collected. Zero collects on demand during each scrape.
+  metricsCollectionInterval: 30
   # -- Enables monitoring OVN-Kubernetes control plane and OVN configuration duration
   enableConfigDuration: ""
   # -- Indicates if ovn-controller should enable/disable the logical flow in-memory cache when processing Southbound database logical flow changes

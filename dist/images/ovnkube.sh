@@ -85,6 +85,7 @@ fi
 # OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
 # OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
 # OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
+# OVN_METRICS_COLLECTION_INTERVAL - OVN/OVS metrics collection interval in seconds (default 30; 0 is on-demand)
 # OVN_KUBERNETES_CONNTRACK_ZONE - Conntrack zone number used for openflow rules (default 64000)
 # OVN_NORTHD_BACKOFF_INTERVAL - ovn northd backoff interval in ms (default 300)
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
@@ -185,6 +186,9 @@ metrics_bind_port=${OVN_METRICS_BIND_PORT:-9476}
 
 # set metrics exporter port
 metrics_exporter_port=${OVN_METRICS_EXPORTER_PORT:-9310}
+
+# set OVN/OVS metrics collection interval
+metrics_collection_interval=${OVN_METRICS_COLLECTION_INTERVAL:-30}
 
 ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
@@ -1842,6 +1846,7 @@ ovnkube-controller-with-node() {
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${metrics_bind_address} \
     --metrics-enable-pprof \
+    --metrics-collection-interval=${metrics_collection_interval} \
     --mtu=${mtu} \
     --nodeport \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
@@ -2548,6 +2553,7 @@ ovn-node() {
         --loglevel=${ovnkube_loglevel} \
         --metrics-bind-address ${ovnkube_node_metrics_bind_address} \
         --metrics-enable-pprof \
+        --metrics-collection-interval=${metrics_collection_interval} \
         --mtu=${mtu} \
         --nodeport \
         --ovn-config-namespace ${ovn_kubernetes_namespace} \
@@ -2602,7 +2608,8 @@ ovs-metrics() {
   /usr/bin/ovn-kube-util \
     --loglevel=${ovnkube_loglevel} \
     ovs-exporter \
-    --metrics-bind-address ${ovs_exporter_bind_address}
+    --metrics-bind-address ${ovs_exporter_bind_address} \
+    --metrics-collection-interval=${metrics_collection_interval}
 
   echo "=============== ovs-metrics with pid ${?} terminated ========== "
   exit 1

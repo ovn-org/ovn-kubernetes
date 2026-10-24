@@ -311,6 +311,8 @@ spec:
           value: {{ default "" .Values.global.enableConfigDuration | quote }}
         - name: OVNKUBE_METRICS_SCALE_ENABLE
           value: {{ default "" .Values.global.enableMetricsScale | quote }}
+        - name: OVN_METRICS_COLLECTION_INTERVAL
+          value: {{ hasKey .Values.global "metricsCollectionInterval" | ternary .Values.global.metricsCollectionInterval 30 | quote }}
         - name: OVN_NET_CIDR
           value: {{ default "" .Values.global.dpuHostClusterNetworkCIDR | quote }}
         - name: OVN_SVC_CIDR
@@ -525,6 +527,8 @@ spec:
           value: "1.4.0"
         - name: OVNKUBE_NODE_MODE
           value: "dpu"
+        - name: OVN_METRICS_COLLECTION_INTERVAL
+          value: {{ hasKey .Values.global "metricsCollectionInterval" | ternary .Values.global.metricsCollectionInterval 30 | quote }}
         # end of container
       nodeSelector:
         kubernetes.io/os: "linux"

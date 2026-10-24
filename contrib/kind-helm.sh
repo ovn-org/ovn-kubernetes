@@ -559,6 +559,7 @@ print_params() {
      echo "OVN_ENCAP_PORT = $OVN_ENCAP_PORT"
      echo "OVN_DISABLE_PKT_MTU_CHECK = $OVN_DISABLE_PKT_MTU_CHECK"
      echo "OVN_METRICS_SCALE_ENABLE = $OVN_METRICS_SCALE_ENABLE"
+     echo "OVN_METRICS_COLLECTION_INTERVAL = $OVN_METRICS_COLLECTION_INTERVAL"
      echo "OVN_EGRESSIP_HEALTHCHECK_PORT = $OVN_EGRESSIP_HEALTHCHECK_PORT"
      echo "OVN_NETFLOW_TARGETS = $OVN_NETFLOW_TARGETS"
      echo "OVN_SFLOW_TARGETS = $OVN_SFLOW_TARGETS"
@@ -715,6 +716,7 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} 
           --set global.enableOvnKubeIdentity=$(if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set tags.ovnkube-identity=$(if [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableMetricsScale=$(if [ "${OVN_METRICS_SCALE_ENABLE}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.metricsCollectionInterval="${OVN_METRICS_COLLECTION_INTERVAL}" \
           $( [ -n "${OVN_EGRESSIP_HEALTHCHECK_PORT}" ] && echo "--set global.egressIpHealthCheckPort=${OVN_EGRESSIP_HEALTHCHECK_PORT}" ) \
           $( [ -n "${OVN_NETFLOW_TARGETS}" ] && echo "--set global.netFlowTargets=${OVN_NETFLOW_TARGETS//,/\\,}" ) \
           $( [ -n "${OVN_SFLOW_TARGETS}" ] && echo "--set global.sflowTargets=${OVN_SFLOW_TARGETS//,/\\,}" ) \

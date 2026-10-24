@@ -368,6 +368,8 @@ spec:
           value: {{ default "" .Values.global.enableConfigDuration | quote }}
         - name: OVNKUBE_METRICS_SCALE_ENABLE
           value: {{ default "" .Values.global.enableMetricsScale | quote }}
+        - name: OVN_METRICS_COLLECTION_INTERVAL
+          value: {{ hasKey .Values.global "metricsCollectionInterval" | ternary .Values.global.metricsCollectionInterval 30 | quote }}
         - name: OVN_NET_CIDR
           valueFrom:
             configMapKeyRef:
@@ -618,6 +620,8 @@ spec:
         - name: METRICS_IP
           value: {{ .Values.global.metricsIp | quote }}
         {{- end }}
+        - name: OVN_METRICS_COLLECTION_INTERVAL
+          value: {{ hasKey .Values.global "metricsCollectionInterval" | ternary .Values.global.metricsCollectionInterval 30 | quote }}
         # end of container
       nodeSelector:
         kubernetes.io/os: "linux"

@@ -32,7 +32,7 @@ const (
 	metricsUpdateInterval = 5 * time.Minute
 
 	// defaultCollectionInterval is how often the background loop refreshes OVS/OVN
-	// metric values when MetricServerOptions.CollectionInterval is unset.
+	// metric values when MetricServerOptions.CollectionInterval is unset or negative.
 	defaultCollectionInterval = config.DefaultMetricsCollectionInterval
 
 	// metricsAppctlTimeout (seconds) bounds every ovs-appctl/ovn-appctl subprocess on
@@ -458,13 +458,17 @@ func StartMetricsServer(opts MetricServerOptions, stopChan <-chan struct{}, wg *
 		metricsServer.Run(stopChan)
 	}()
 
-	// Extraction runs out of band from scraping: the loop refreshes the registry
-	// on its own interval and the scrape handler only serializes it.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		metricsServer.runCollectionLoop(stopChan)
-	}()
+	if opts.CollectionInterval != 0 {
+		// Extraction runs out of band from scraping: the loop refreshes the registry
+		// on its own interval and the scrape handler only serializes it.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			metricsServer.runCollectionLoop(stopChan)
+		}()
+	} else {
+		klog.Infof("Metrics collection is on on-demand mode, no background collection loop will be started")
+	}
 
 	return metricsServer
 }

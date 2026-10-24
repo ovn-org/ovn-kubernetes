@@ -347,6 +347,36 @@ var _ = Describe("Config Operations", func() {
 		gomega.Expect(logs.String()).NotTo(gomega.ContainSubstring(token))
 	})
 
+	DescribeTable("metrics collection interval",
+		func(fileValue, cliValue string, expected int) {
+			if fileValue != "" {
+				_, err := cfgFile.WriteString("[metrics]\ncollection-interval=" + fileValue + "\n")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+			app.Action = func(ctx *cli.Context) error {
+				_, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
+				return err
+			}
+			args := []string{app.Name, "--config-file=" + cfgFile.Name()}
+			if cliValue != "" {
+				args = append(args, "--metrics-collection-interval="+cliValue)
+			}
+			gomega.Expect(app.Run(args)).To(gomega.Succeed())
+			gomega.Expect(Metrics.CollectionInterval).To(gomega.Equal(expected))
+		},
+		Entry("defaults to periodic collection", "", "", 30),
+		Entry("enables on-demand collection via CLI", "", "0", 0),
+		Entry("enables on-demand collection via config file", "0", "", 0),
+		Entry("sets a positive interval via CLI", "", "15", 15),
+		Entry("sets a positive interval via config file", "15", "", 15),
+		Entry("CLI zero overrides a positive file value", "15", "0", 0),
+		Entry("CLI positive value overrides file zero", "0", "15", 15),
+		Entry("explicit CLI default overrides file zero", "0", "30", 30),
+		Entry("explicit CLI default overrides a positive file value", "15", "30", 30),
+		Entry("preserves negative CLI values for default fallback", "0", "-1", -1),
+		Entry("preserves negative file values for default fallback", "-1", "", -1),
+	)
+
 	It("uses expected defaults", func() {
 		app.Action = func(ctx *cli.Context) error {
 			cfgPath, err := InitConfigSa(ctx, kexec.New(), tmpDir, nil)
