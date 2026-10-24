@@ -3958,6 +3958,80 @@ spec:
 			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("The \"k8s.ovn.org/egressip-mark\" annotation cannot be modified or removed once set. This annotation is managed by the system.")))
 		})
 
+		ginkgo.It("Should preserve a pre-existing foreign annotation when the egressip-mark annotation is added", func() {
+			ginkgo.By("1. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
+			egressNodeAvailabilityHandler := egressNodeAvailabilityHandlerViaLabel{f}
+			egressNodeAvailabilityHandler.Enable(egress1Node.name)
+			defer egressNodeAvailabilityHandler.Restore(egress1Node.name)
+
+			podNamespace := f.Namespace
+			labels := map[string]string{
+				"name": f.Namespace.Name,
+			}
+			updateNamespaceLabels(f, podNamespace, labels)
+
+			ginkgo.By("2. Create an EgressIP object carrying a foreign annotation, as e.g. a GitOps tool would add")
+			var egressIP1 net.IP
+			var err error
+			if utilnet.IsIPv6String(egress1Node.nodeIP) {
+				egressIP1, err = ipalloc.NewPrimaryIPv6()
+			} else {
+				egressIP1, err = ipalloc.NewPrimaryIPv4()
+			}
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
+
+			const foreignAnnotationKey = "example.com/foreign-annotation"
+			const foreignAnnotationValue = "do-not-remove"
+
+			var egressIPConfig = `apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: ` + egressIPName + `
+    annotations:
+      ` + foreignAnnotationKey + `: "` + foreignAnnotationValue + `"
+spec:
+    egressIPs:
+    - ` + egressIP1.String() + `
+    namespaceSelector:
+        matchLabels:
+            name: ` + f.Namespace.Name + `
+`
+			if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			defer func() {
+				if err := os.Remove(egressIPYaml); err != nil {
+					framework.Logf("Unable to remove the CRD config from disk: %v", err)
+				}
+			}()
+
+			framework.Logf("Create the EgressIP configuration")
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+			ginkgo.By("3. Wait for the EgressIP to be assigned, which drives the egressip-mark annotation patch")
+			statuses := verifyEgressIPStatusLengthEquals(1, nil)
+			if statuses[0].Node != egress1Node.name {
+				framework.Failf("Step 3. Check that the status is of length one and that it is assigned to egress1Node, failed")
+			}
+
+			ginkgo.By("4. Verify the egressip-mark annotation was added and the foreign annotation was preserved")
+			var annotations map[string]string
+			err = wait.PollUntilContextTimeout(context.TODO(), retryInterval, retryTimeout, true, func(context.Context) (bool, error) {
+				annotationsJSON, err := e2ekubectl.RunKubectl("", "get", "egressip", egressIPName, "-o", "jsonpath={.metadata.annotations}")
+				if err != nil {
+					return false, nil
+				}
+				if unmarshalErr := json.Unmarshal([]byte(annotationsJSON), &annotations); unmarshalErr != nil {
+					return false, nil
+				}
+				_, hasMark := annotations[util.EgressIPMarkAnnotation]
+				return hasMark, nil
+			})
+			framework.ExpectNoError(err, "timed out waiting for the egressip-mark annotation to be set")
+			gomega.Expect(annotations).To(gomega.HaveKeyWithValue(foreignAnnotationKey, foreignAnnotationValue),
+				"foreign annotation must survive the egressip-mark annotation patch")
+		})
+
 		ginkgo.It("Should skip orphaned nodes and assign EgressIPs to valid nodes", func() {
 			if isUserDefinedNetwork(netConfigParams) {
 				ginkgo.Skip("Unsupported for UDNs")

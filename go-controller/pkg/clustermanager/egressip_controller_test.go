@@ -5,6 +5,7 @@ package clustermanager
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -29,6 +31,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -4949,3 +4952,75 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 		})
 	})
 })
+
+const testEgressIPMarkPatchName = "eip-mark-patch-test"
+
+// applyMarkPatchOps seeds a fake EgressIP clientset (see egressipfake.NewClientset)
+// with an object at the given annotations and resourceVersion, then applies ops
+// via a real JSON Patch request. This exercises the actual patch-application
+// code path rather than a hand-rolled simulation of RFC 6902 semantics.
+// resourceVersion models the object's actual state at apply time, which may
+// differ from what the patch was generated against.
+func applyMarkPatchOps(t *testing.T, annotations map[string]string, resourceVersion string, ops []jsonPatchOperation) (map[string]string, error) {
+	t.Helper()
+	seed := &egressipv1.EgressIP{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            testEgressIPMarkPatchName,
+			Annotations:     annotations,
+			ResourceVersion: resourceVersion,
+		},
+	}
+	client := egressipfake.NewClientset(seed).K8sV1().EgressIPs()
+
+	data, err := json.Marshal(ops)
+	if err != nil {
+		t.Fatalf("failed to marshal patch ops: %v", err)
+	}
+	updated, err := client.Patch(context.Background(), testEgressIPMarkPatchName, k8stypes.JSONPatchType, data, metav1.PatchOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return updated.Annotations, nil
+}
+
+func TestGenerateMarkPatchOpsFailsClosedOnConcurrentAnnotationAdd(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	// Patch generated while annotations was still empty at resourceVersion "1".
+	ops := generateMarkPatchOps(nil, "1", 50003)
+
+	// By the time the patch is applied, a concurrent writer has bumped the
+	// resourceVersion by adding its own annotation. The whole patch must be
+	// rejected rather than silently discarding that annotation.
+	concurrentlyAdded := map[string]string{"argocd.argoproj.io/tracking-id": "some-app"}
+	result, err := applyMarkPatchOps(t, concurrentlyAdded, "2", ops)
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(result).To(gomega.BeNil())
+}
+
+func TestGenerateMarkPatchOpsSucceedsWhenResourceVersionMatches(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	ops := generateMarkPatchOps(nil, "1", 50004)
+
+	result, err := applyMarkPatchOps(t, nil, "1", ops)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(result).To(gomega.HaveKeyWithValue(util.EgressIPMarkAnnotation, "50004"))
+}
+
+func TestGenerateMarkPatchOpsSkipsGuardWhenResourceVersionUnknown(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	ops := generateMarkPatchOps(nil, "", 50005)
+
+	g.Expect(ops).To(gomega.HaveLen(2))
+	g.Expect(ops[0].Path).To(gomega.Equal("/metadata/annotations"))
+	g.Expect(ops[1].Path).To(gomega.Equal("/metadata/annotations/k8s.ovn.org~1egressip-mark"))
+}
+
+func TestEscapeJSONPatchPathKey(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	g.Expect(escapeJSONPatchPathKey(util.EgressIPMarkAnnotation)).To(gomega.Equal("k8s.ovn.org~1egressip-mark"))
+	g.Expect(escapeJSONPatchPathKey("a~b/c")).To(gomega.Equal("a~0b~1c"))
+}
