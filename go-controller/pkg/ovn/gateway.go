@@ -751,7 +751,6 @@ func (gw *GatewayManager) updateClusterRouterStaticRoutes(gwConfig *GatewayConfi
 	// to the same gateway router
 	//
 	// This can be removed once https://bugzilla.redhat.com/show_bug.cgi?id=1891516 is fixed.
-	// FIXME(trozet): if LRP IP is changed, we do not remove stale instances of these routes
 	nextHops := gwRouterIPs
 	if gw.netInfo.TopologyType() == types.Layer2Topology && gw.transitRouterInfo != nil {
 		nextHops = util.IPNetsToIPs(gw.transitRouterInfo.gatewayRouterNets)
@@ -787,6 +786,12 @@ func (gw *GatewayManager) updateClusterRouterStaticRoutes(gwConfig *GatewayConfi
 		}
 
 		if gw.clusterRouterName != "" {
+			// delete stale static routes from ovn_cluster_router specific to default network
+			if gw.clusterRouterName == types.OVNClusterRouter {
+				if err = gw.deleteStaleJoinSubnetRoutes(gwRouterIP.String()); err != nil {
+					klog.Errorf("Could not remove stale static route %v", err)
+				}
+			}
 			err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicate(gw.nbClient,
 				gw.clusterRouterName, &lrsr, p, &lrsr.Nexthop)
 			if err != nil {
@@ -1727,6 +1732,33 @@ func (gw *GatewayManager) staticRouteCleanup(nextHops []net.IP, ipPrefix *net.IP
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		klog.Errorf("Failed to delete static route for nexthops %+v: %v", ips.UnsortedList(), err)
 	}
+}
+
+// deleteStaleJoinSubnetRoutes removes static routes referencing old join switch IP as either NextHop or IPPrefix.
+// It acts on following LRSRs:
+// 100.64.0.4               100.64.0.4 dst-ip
+func (gw *GatewayManager) deleteStaleJoinSubnetRoutes(gwLRPIP string) error {
+	p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		if lrsr.Nexthop != gwLRPIP && utilnet.IPFamilyOfString(lrsr.Nexthop) == utilnet.IPFamilyOfString(gwLRPIP) &&
+			lrsr.Nexthop == lrsr.IPPrefix {
+			networkName, isSecondaryNetwork := lrsr.ExternalIDs[types.NetworkExternalID]
+			if isSecondaryNetwork && networkName == gw.netInfo.GetNetworkName() {
+				klog.Infof("Removing stale join subnet route %s via %s from router %s for network %s",
+					lrsr.IPPrefix, lrsr.Nexthop, gw.clusterRouterName, networkName)
+				return true
+			} else if !isSecondaryNetwork {
+				klog.Infof("Removing stale join subnet route %s via %s from router %s",
+					lrsr.IPPrefix, lrsr.Nexthop, gw.clusterRouterName)
+				return true
+			}
+		}
+		return false
+	}
+
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(gw.nbClient, gw.clusterRouterName, p); err != nil {
+		return fmt.Errorf("failed to delete static route from router %s: %v", gw.clusterRouterName, err)
+	}
+	return nil
 }
 
 // policyRouteCleanup cleans up all policies on cluster router that have a nextHop

@@ -111,6 +111,20 @@ func TestCreateDefaultRouteToExternal(t *testing.T) {
 		Ports: []string{gwRouterPort.UUID},
 	}
 
+	// to test that we remove route with next hop from old join subnet and add route with next hop from current join subnet
+	oldNextHopClusterSubnetRouteV4 := &nbdb.LogicalRouterStaticRoute{
+		IPPrefix: clusterSubnetV4.String(),
+		Nexthop:  "100.66.0.3",
+		Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+		UUID:     "old-join-subnet-route-v4-uuid",
+	}
+	oldNextHopClusterSubnetRouteV6 := &nbdb.LogicalRouterStaticRoute{
+		IPPrefix: clusterSubnetV6.String(),
+		Nexthop:  "fd96::3",
+		Policy:   &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+		UUID:     "old-join-subnet-route-v6-uuid",
+	}
+
 	tests := []struct {
 		desc          string
 		initialNbdb   libovsdbtest.TestSetup
@@ -158,6 +172,39 @@ func TestCreateDefaultRouteToExternal(t *testing.T) {
 						Name:         ovnClusterRouterName,
 						UUID:         ovnClusterRouterName + "-uuid",
 						StaticRoutes: []string{nodeSubnetRouteV4.UUID, nodeSubnetRouteV6.UUID, wrongNextHopClusterSubnetRouteV4.UUID, wrongNextHopClusterSubnetRouteV6.UUID},
+					},
+					gatewayRouter,
+					gwRouterPort,
+					nodeSubnetRouteV4,
+					nodeSubnetRouteV6,
+				},
+			},
+			expectedNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					&nbdb.LogicalRouter{
+						Name:         ovnClusterRouterName,
+						UUID:         ovnClusterRouterName + "-uuid",
+						StaticRoutes: []string{nodeSubnetRouteV4.UUID, nodeSubnetRouteV6.UUID, clusterSubnetRouteV4.UUID, clusterSubnetRouteV6.UUID},
+					},
+					gatewayRouter,
+					gwRouterPort,
+					nodeSubnetRouteV4,
+					nodeSubnetRouteV6,
+					clusterSubnetRouteV4,
+					clusterSubnetRouteV6,
+				},
+			},
+		},
+		{
+			desc: "Remove route with next hop from old join subnet and add route with next hop from current join subnet", // should replace the existing one
+			initialNbdb: libovsdbtest.TestSetup{
+				NBData: []libovsdbtest.TestData{
+					oldNextHopClusterSubnetRouteV4,
+					oldNextHopClusterSubnetRouteV6,
+					&nbdb.LogicalRouter{
+						Name:         ovnClusterRouterName,
+						UUID:         ovnClusterRouterName + "-uuid",
+						StaticRoutes: []string{nodeSubnetRouteV4.UUID, nodeSubnetRouteV6.UUID, oldNextHopClusterSubnetRouteV4.UUID, oldNextHopClusterSubnetRouteV6.UUID},
 					},
 					gatewayRouter,
 					gwRouterPort,

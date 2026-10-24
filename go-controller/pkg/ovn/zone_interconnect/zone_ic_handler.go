@@ -540,6 +540,10 @@ func (zic *ZoneInterconnectHandler) createRemoteZoneNodeResources(node *corev1.N
 		return err
 	}
 
+	if err := zic.deleteStaleStaticRoutes(node, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs); err != nil {
+		return err
+	}
+
 	if err := zic.addRemoteNodeStaticRoutes(node, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs); err != nil {
 		return err
 	}
@@ -781,6 +785,44 @@ func (zic *ZoneInterconnectHandler) getStaticRoutes(ipPrefixes []*net.IPNet, nex
 	}
 
 	return staticRoutes
+}
+
+// deleteStaleStaticRoutes removes the static route no longer match the ones
+// addRemoteNodeStaticRoutes would create for it.Those are left behind when the
+// node transit switch IP or the node gateway router join IP change as part of a
+// day 2 operation, since the routes are keyed by IPPrefix and a changed IPPrefix
+// ends up creating a new route instead of replacing the old one.
+func (zic *ZoneInterconnectHandler) deleteStaleStaticRoutes(node *corev1.Node, nodeTransitSwitchPortIPs, nodeSubnets, nodeGRPIPs []*net.IPNet) error {
+	routeKey := func(prefix, nexthop string) string {
+		return prefix + " " + nexthop
+	}
+
+	expectedRoutes := sets.New[string]()
+	for _, staticRoute := range zic.getStaticRoutes(nodeSubnets, nodeTransitSwitchPortIPs, false) {
+		expectedRoutes.Insert(routeKey(staticRoute.prefix, staticRoute.nexthop))
+	}
+	for _, staticRoute := range zic.getStaticRoutes(nodeGRPIPs, nodeTransitSwitchPortIPs, true) {
+		expectedRoutes.Insert(routeKey(staticRoute.prefix, staticRoute.nexthop))
+	}
+
+	p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
+		if lrsr.ExternalIDs["ic-node"] != node.Name {
+			return false
+		}
+		if networkName, isSet := lrsr.ExternalIDs[types.NetworkExternalID]; isSet && networkName != zic.GetNetworkName() {
+			return false
+		}
+		if !expectedRoutes.Has(routeKey(lrsr.IPPrefix, lrsr.Nexthop)) {
+			klog.Infof("Removing stale static route %s via %s from router %s for node %s network %s",
+				lrsr.IPPrefix, lrsr.Nexthop, zic.networkClusterRouterName, node.Name, zic.GetNetworkName())
+			return true
+		}
+		return false
+	}
+	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(zic.nbClient, zic.networkClusterRouterName, p); err != nil {
+		return fmt.Errorf("failed to delete stale static routes of node %s from router %s: %w", node.Name, zic.networkClusterRouterName, err)
+	}
+	return nil
 }
 
 func getUserDefinedNetTransitSwitchExtIDs(networkName, topology string, isPrimaryUDN bool) map[string]string {
