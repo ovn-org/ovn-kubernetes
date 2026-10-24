@@ -293,6 +293,7 @@ type podConfiguration struct {
 	hostNetwork            bool
 	ipRequestFromSubnet    string
 	usesExternalRouter     bool
+	staticIP               string // IP address without CIDR suffix, set by withStaticIPMAC
 }
 
 func generatePodSpec(config podConfiguration) *v1.Pod {
@@ -456,6 +457,7 @@ func connectToServer(clientPodConfig podConfiguration, serverIP string, port uin
 		clientPodConfig.name,
 		"--",
 		"curl",
+		"-g", // Disable URL globbing to support IPv6 addresses with brackets
 		"--connect-timeout",
 		"2",
 	}
