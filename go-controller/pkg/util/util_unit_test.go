@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -19,8 +20,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	v1 "k8s.io/client-go/listers/discovery/v1"
+	"k8s.io/client-go/tools/cache"
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -535,6 +539,358 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 				return
 			}
 			assert.Equalf(t, tt.want, got, "ServiceFromEndpointSlice(%v, %v)", tt.args.eps, tt.args.netInfo)
+		})
+	}
+}
+
+// fakeEndpointSliceLister implements discoverylisters.EndpointSliceLister for testing
+type fakeEndpointSliceLister struct {
+	indexer      cache.Indexer
+	errorOnLabel string
+}
+
+func (f *fakeEndpointSliceLister) List(_ labels.Selector) ([]*discovery.EndpointSlice, error) {
+	// Not used by GetServiceEndpointSlices - namespace-scoped List() is used instead
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (f *fakeEndpointSliceLister) EndpointSlices(namespace string) v1.EndpointSliceNamespaceLister {
+	return &fakeEndpointSliceNamespaceLister{
+		indexer:      f.indexer,
+		namespace:    namespace,
+		errorOnLabel: f.errorOnLabel,
+	}
+}
+
+type fakeEndpointSliceNamespaceLister struct {
+	indexer      cache.Indexer
+	namespace    string
+	errorOnLabel string
+}
+
+func (f *fakeEndpointSliceNamespaceLister) List(selector labels.Selector) ([]*discovery.EndpointSlice, error) {
+	if f.errorOnLabel != "" && selector.String() != "" {
+		if strings.Contains(selector.String(), f.errorOnLabel) {
+			return nil, fmt.Errorf("injected error for testing")
+		}
+	}
+
+	var result []*discovery.EndpointSlice
+	for _, obj := range f.indexer.List() {
+		eps := obj.(*discovery.EndpointSlice)
+		if eps.Namespace != f.namespace {
+			continue
+		}
+		if selector.Matches(labels.Set(eps.Labels)) {
+			result = append(result, eps)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeEndpointSliceNamespaceLister) Get(_ string) (*discovery.EndpointSlice, error) {
+	// Not used by GetServiceEndpointSlices - only List() is called
+	return nil, fmt.Errorf("not implemented")
+}
+
+func TestGetServiceEndpointSlices(t *testing.T) {
+	tests := []struct {
+		name               string
+		namespace          string
+		serviceName        string
+		network            string
+		existingSlices     []*discovery.EndpointSlice
+		expectedSliceCount int
+		expectError        bool
+		errorOnLabel       string
+		description        string
+	}{
+		// Scenario 1: Default network returns combined default + UDN slices
+		{
+			name:        "default network with both default and UDN slices",
+			namespace:   "test-ns",
+			serviceName: "test-service",
+			network:     types.DefaultNetworkName,
+			existingSlices: []*discovery.EndpointSlice{
+				// Default network endpoint slice
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service-abc",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							discovery.LabelServiceName: "test-service",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"10.244.0.5"},
+						},
+					},
+				},
+				// UDN endpoint slice (mirrored from Primary CUDN with open-default-ports)
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service-udn-xyz",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							types.LabelUserDefinedServiceName: "test-service",
+						},
+						Annotations: map[string]string{
+							types.UserDefinedNetworkEndpointSliceAnnotation: "primary-cudn",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"192.168.0.5"},
+						},
+					},
+				},
+				// UDN endpoint slice for a different network (also returned for default network query)
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service-udn-other",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							types.LabelUserDefinedServiceName: "test-service",
+						},
+						Annotations: map[string]string{
+							types.UserDefinedNetworkEndpointSliceAnnotation: "secondary-cudn",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"192.168.1.5"},
+						},
+					},
+				},
+			},
+			expectedSliceCount: 3,
+			expectError:        false,
+			description:        "Should return combined default + all UDN endpoint slices for default network service",
+		},
+		// Scenario 2: Default network when no UDN slices exist
+		{
+			name:        "default network when no UDN slices exist",
+			namespace:   "test-ns",
+			serviceName: "test-service",
+			network:     types.DefaultNetworkName,
+			existingSlices: []*discovery.EndpointSlice{
+				// Only default network endpoint slice exists
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service-abc",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							discovery.LabelServiceName: "test-service",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"10.244.0.5"},
+						},
+					},
+				},
+				// NO UDN slices exist (UDN lookup returns empty)
+			},
+			expectedSliceCount: 1,
+			expectError:        false,
+			description:        "Should return only default slices when no UDN slices exist",
+		},
+		// Scenario 3: Non-default network behavior unchanged
+		{
+			name:        "UDN network returns only UDN slices for that network",
+			namespace:   "test-ns",
+			serviceName: "test-service",
+			network:     "primary-cudn",
+			existingSlices: []*discovery.EndpointSlice{
+				// Default network slice (should be IGNORED for UDN network query)
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service-abc",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							discovery.LabelServiceName: "test-service",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"10.244.0.5"},
+						},
+					},
+				},
+				// UDN slice for primary-cudn network
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service-udn-xyz",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							types.LabelUserDefinedServiceName: "test-service",
+						},
+						Annotations: map[string]string{
+							types.UserDefinedNetworkEndpointSliceAnnotation: "primary-cudn",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"192.168.0.5"},
+						},
+					},
+				},
+				// UDN slice for different network (should be filtered out)
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-service-other-udn",
+						Namespace: "test-ns",
+						Labels: map[string]string{
+							types.LabelUserDefinedServiceName: "test-service",
+						},
+						Annotations: map[string]string{
+							types.UserDefinedNetworkEndpointSliceAnnotation: "other-network",
+						},
+					},
+					Endpoints: []discovery.Endpoint{
+						{
+							Addresses: []string{"192.168.1.5"},
+						},
+					},
+				},
+			},
+			expectedSliceCount: 1,
+			expectError:        false,
+			description:        "Non-default network query should only return UDN slices for that specific network",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+			for _, eps := range tt.existingSlices {
+				err := indexer.Add(eps)
+				require.NoError(t, err)
+			}
+
+			lister := &fakeEndpointSliceLister{
+				indexer:      indexer,
+				errorOnLabel: tt.errorOnLabel,
+			}
+
+			result, err := GetServiceEndpointSlices(tt.namespace, tt.serviceName, tt.network, lister)
+
+			if tt.expectError {
+				require.Error(t, err, tt.description)
+			} else {
+				require.NoError(t, err, tt.description)
+				assert.Len(t, result, tt.expectedSliceCount, tt.description)
+
+				if tt.name == "default network with both default and UDN slices" {
+					require.Len(t, result, 3, "Should return 3 distinct slices")
+
+					var defaultSliceCount, udnSliceCount int
+					sliceNames := make(map[string]bool)
+					for _, slice := range result {
+						assert.False(t, sliceNames[slice.Name], "Slice names should be unique: %s", slice.Name)
+						sliceNames[slice.Name] = true
+
+						if _, hasDefaultLabel := slice.Labels[discovery.LabelServiceName]; hasDefaultLabel {
+							defaultSliceCount++
+						}
+						if _, hasUDNLabel := slice.Labels[types.LabelUserDefinedServiceName]; hasUDNLabel {
+							udnSliceCount++
+						}
+					}
+					assert.Equal(t, 1, defaultSliceCount, "Should have exactly 1 default slice")
+					assert.Equal(t, 2, udnSliceCount, "Should have exactly 2 UDN slices")
+
+					allIPs := []string{}
+					for _, slice := range result {
+						for _, ep := range slice.Endpoints {
+							allIPs = append(allIPs, ep.Addresses...)
+						}
+					}
+					assert.Contains(t, allIPs, "10.244.0.5", "Should include default network IP")
+					assert.Contains(t, allIPs, "192.168.0.5", "Should include primary-cudn UDN IP")
+					assert.Contains(t, allIPs, "192.168.1.5", "Should include secondary-cudn UDN IP")
+				}
+
+				if tt.name == "default network when no UDN slices exist" {
+					require.Len(t, result, 1, "Should return exactly one slice")
+					returnedSlice := result[0]
+					assert.Equal(t, "test-service", returnedSlice.Labels[discovery.LabelServiceName],
+						"Returned slice should have default network service label")
+					_, hasUDNLabel := returnedSlice.Labels[types.LabelUserDefinedServiceName]
+					assert.False(t, hasUDNLabel, "Returned slice should NOT have UDN label")
+				}
+
+				if tt.name == "UDN network returns only UDN slices for that network" {
+					require.Len(t, result, 1, "Should return exactly one slice")
+					returnedSlice := result[0]
+					assert.Equal(t, "primary-cudn", returnedSlice.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation],
+						"Returned slice should be for the requested network")
+
+					require.Len(t, returnedSlice.Endpoints, 1, "Should have exactly one endpoint")
+					assert.Contains(t, returnedSlice.Endpoints[0].Addresses, "192.168.0.5",
+						"Should include primary-cudn network IP")
+
+					allIPs := []string{}
+					for _, ep := range returnedSlice.Endpoints {
+						allIPs = append(allIPs, ep.Addresses...)
+					}
+					assert.NotContains(t, allIPs, "10.244.0.5", "Should NOT include default network IP")
+					assert.NotContains(t, allIPs, "192.168.1.5", "Should NOT include other-network UDN IP")
+				}
+			}
+		})
+	}
+}
+
+// TestGetServiceEndpointSlicesErrors tests error handling in GetServiceEndpointSlices
+func TestGetServiceEndpointSlicesErrors(t *testing.T) {
+	errorTests := []struct {
+		name         string
+		namespace    string
+		serviceName  string
+		network      string
+		errorOnLabel string
+		description  string
+	}{
+		{
+			name:         "error fetching default slices for default network",
+			namespace:    "test-ns",
+			serviceName:  "test-service",
+			network:      types.DefaultNetworkName,
+			errorOnLabel: discovery.LabelServiceName,
+			description:  "Should return error when default slice lookup fails",
+		},
+		{
+			name:         "error fetching UDN slices for non-default network",
+			namespace:    "test-ns",
+			serviceName:  "test-service",
+			network:      "primary-cudn",
+			errorOnLabel: types.LabelUserDefinedServiceName,
+			description:  "Should return error when UDN slice lookup fails for non-default network",
+		},
+		{
+			name:         "error fetching UDN slices for default network",
+			namespace:    "test-ns",
+			serviceName:  "test-service",
+			network:      types.DefaultNetworkName,
+			errorOnLabel: types.LabelUserDefinedServiceName,
+			description:  "Should return error when UDN slice lookup fails for default network",
+		},
+	}
+
+	for _, tt := range errorTests {
+		t.Run(tt.name, func(t *testing.T) {
+			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+			lister := &fakeEndpointSliceLister{
+				indexer:      indexer,
+				errorOnLabel: tt.errorOnLabel,
+			}
+
+			result, err := GetServiceEndpointSlices(tt.namespace, tt.serviceName, tt.network, lister)
+
+			require.Error(t, err, tt.description)
+			assert.Nil(t, result, "Result should be nil when error occurs")
 		})
 	}
 }

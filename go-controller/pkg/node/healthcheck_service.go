@@ -50,8 +50,10 @@ func (l *loadBalancerHealthChecker) AddService(svc *corev1.Service) error {
 		if err := l.server.SyncServices(l.services); err != nil {
 			return fmt.Errorf("unable to sync service %v; err: %v", name, err)
 		}
-		// we can use CDN here and do not care about UDN because we are just looking for a count
-		// which will be the same between CDN and UDN
+		// GetServiceEndpointSlices returns both default network and UDN endpoint slices.
+		// For Primary UDN services, this means counting both network interfaces of dual-attached pods,
+		// which results in a higher count than the actual pod count. However, the healthcheck only uses
+		// the count to determine binary health (count > 0 = healthy), so this does not affect functionality.
 		epSlices, err := l.watchFactory.GetServiceEndpointSlices(svc.Namespace, svc.Name, types.DefaultNetworkName)
 		if err != nil {
 			return fmt.Errorf("could not fetch endpointslices "+

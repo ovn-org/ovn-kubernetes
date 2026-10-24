@@ -597,7 +597,21 @@ func GetServiceEndpointSlices(namespace, svcName, network string, endpointSliceL
 		selector = metav1.LabelSelector{MatchLabels: map[string]string{
 			discoveryv1.LabelServiceName: svcName,
 		}}
-		return GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
+		endpointSlices, err := GetEndpointSlicesBySelector(namespace, selector, endpointSliceLister)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list default-network endpoint slices for service %s/%s: %w", namespace, svcName, err)
+		}
+		udnSelector := metav1.LabelSelector{MatchLabels: map[string]string{
+			types.LabelUserDefinedServiceName: svcName,
+		}}
+		udnSlices, err := GetEndpointSlicesBySelector(namespace, udnSelector, endpointSliceLister)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list UDN endpoint slices for service %s/%s: %w", namespace, svcName, err)
+		}
+		if udnSlices != nil {
+			endpointSlices = append(endpointSlices, udnSlices...)
+		}
+		return endpointSlices, nil
 	}
 
 	selector = metav1.LabelSelector{MatchLabels: map[string]string{
