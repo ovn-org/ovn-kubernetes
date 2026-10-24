@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
@@ -170,6 +171,7 @@ func NewLocalnetUserDefinedNetworkController(
 	networkManager networkmanager.Interface,
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
+	observManager *observability.Manager,
 ) *LocalnetUserDefinedNetworkController {
 
 	stopChan := make(chan struct{})
@@ -201,6 +203,7 @@ func NewLocalnetUserDefinedNetworkController(
 					addressSetManager:           addressSetManager,
 					nodeReconciler:              nodeReconciler,
 					nodeAnnotationCache:         nodeAnnotationCache,
+					observManager:               observManager,
 				},
 			},
 		},

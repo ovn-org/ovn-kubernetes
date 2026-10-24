@@ -78,6 +78,8 @@ type ControllerManager struct {
 	eIPController *ovn.EgressIPController
 
 	addressSetManager *addresssetmanager.AddressSetManager
+
+	observabilityManager *observability.Manager
 }
 
 func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkmanager.NetworkController, error) {
@@ -88,21 +90,21 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 	switch topoType {
 	case ovntypes.Layer3Topology:
 		oc, err := ovn.NewLayer3UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.eIPController, cm.portCache, cm.addressSetManager, cm.nodeController, cm.serviceController)
+			cm.eIPController, cm.portCache, cm.addressSetManager, cm.nodeController, cm.serviceController, cm.observabilityManager)
 		if err != nil {
 			return nil, err
 		}
 		return oc, nil
 	case ovntypes.Layer2Topology:
 		oc, err := ovn.NewLayer2UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.portCache, cm.eIPController, cm.addressSetManager, cm.nodeController, cm.serviceController)
+			cm.portCache, cm.eIPController, cm.addressSetManager, cm.nodeController, cm.serviceController, cm.observabilityManager)
 		if err != nil {
 			return nil, err
 		}
 		return oc, nil
 	case ovntypes.LocalnetTopology:
 		oc := ovn.NewLocalnetUserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.addressSetManager,
-			cm.nodeController)
+			cm.nodeController, cm.observabilityManager)
 		return oc, nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
@@ -119,12 +121,12 @@ func (cm *ControllerManager) newDummyNetworkController(topoType, netName, role s
 	switch topoType {
 	case ovntypes.Layer3Topology:
 		return ovn.NewLayer3UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.eIPController, cm.portCache, cm.addressSetManager, nil, nil)
+			cm.eIPController, cm.portCache, cm.addressSetManager, nil, nil, nil)
 	case ovntypes.Layer2Topology:
 		return ovn.NewLayer2UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.portCache, cm.eIPController, cm.addressSetManager, nil, nil)
+			cm.portCache, cm.eIPController, cm.addressSetManager, nil, nil, nil)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewLocalnetUserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.addressSetManager, nil), nil
+		return ovn.NewLocalnetUserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.addressSetManager, nil, nil), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -441,6 +443,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}()
 	}
 
+	cm.observabilityManager = observabilityManager
 	err = cm.initDefaultNetworkController(observabilityManager)
 	if err != nil {
 		return fmt.Errorf("failed to init default network controller: %v", err)

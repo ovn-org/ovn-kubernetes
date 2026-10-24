@@ -30,6 +30,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/observability"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
@@ -220,6 +221,7 @@ func NewLayer2UserDefinedNetworkController(
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
 	serviceController *svccontroller.Controller,
+	observManager *observability.Manager,
 ) (*Layer2UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -269,6 +271,7 @@ func NewLayer2UserDefinedNetworkController(
 					addressSetManager:           addressSetManager,
 					nodeReconciler:              nodeReconciler,
 					nodeAnnotationCache:         nodeAnnotationCache,
+					observManager:               observManager,
 				},
 			},
 		},
