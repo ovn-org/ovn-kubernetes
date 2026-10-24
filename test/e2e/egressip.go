@@ -37,7 +37,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -3941,8 +3940,6 @@ spec:
 			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 
 			podNamespace := f.Namespace
-			nodeToOrphan := egress1Node.name
-
 			ginkgo.By("Allocating EgressIP addresses before orphaning node")
 			var egressIP1, egressIP2 net.IP
 			var err error
@@ -3958,36 +3955,94 @@ spec:
 				framework.ExpectNoError(err, "Failed to allocate IPv4 for EgressIP2")
 			}
 
-			ginkgo.By("Removing host-cidrs annotation from one node to simulate orphan")
-			node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodeToOrphan, metav1.GetOptions{})
-			framework.ExpectNoError(err, "Failed to get node %s", nodeToOrphan)
-			originalHostCIDRs := node.Annotations[util.OVNNodeHostCIDRs]
-
-			// The node object is updated by ovnkube-node while the test runs, so
-			// every write here has to be retried on conflict.
-			setHostCIDRs := func(value string) error {
-				return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-					node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodeToOrphan, metav1.GetOptions{})
-					if err != nil {
-						return err
-					}
-					if value == "" {
-						delete(node.Annotations, util.OVNNodeHostCIDRs)
-					} else {
-						node.Annotations[util.OVNNodeHostCIDRs] = value
-					}
-					_, err = f.ClientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
-					return err
-				})
+			// A bare Node is stable: unlike a real kind node, no ovnkube-node
+			// instance can recreate its host-cidrs annotation. The conflict
+			// check must skip this stale/orphaned node while assigning to the
+			// two real, labelled nodes above.
+			egressNode, err := f.ClientSet.CoreV1().Nodes().Get(
+				context.TODO(), egress1Node.name, metav1.GetOptions{})
+			framework.ExpectNoError(err, "Failed to get egress node %s", egress1Node.name)
+			// Copy the network annotations needed for allocator initialization and
+			// reachability. Deliberately omit host-cidrs so the node is rejected.
+			orphanNodeAnnotations := map[string]string{
+				util.OvnNodeIfAddr:          egressNode.Annotations[util.OvnNodeIfAddr],
+				types.NodeSubnetsAnnotation: egressNode.Annotations[types.NodeSubnetsAnnotation],
 			}
+			const cloudEgressIPConfigAnnotation = "cloud.network.openshift.io/egress-ipconfig"
+			if cloudEgressIPConfig, ok := egressNode.Annotations[cloudEgressIPConfigAnnotation]; ok {
+				orphanNodeAnnotations[cloudEgressIPConfigAnnotation] = cloudEgressIPConfig
+			}
+			orphanNodeName := fmt.Sprintf("eip-orphan-%d", time.Now().UnixNano())
+			ginkgo.By("Creating an orphan node without host-cidrs")
+			_, err = f.ClientSet.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: orphanNodeName,
+					Labels: map[string]string{
+						"k8s.ovn.org/egress-assignable": "dummy",
+					},
+					Annotations: orphanNodeAnnotations,
+				},
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
+						{
+							Type:   corev1.NodeReady,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			}, metav1.CreateOptions{})
+			framework.ExpectNoError(err, "Failed to create orphan node %s", orphanNodeName)
+			providerCtx.AddCleanUpFn(func() error {
+				_, err := e2ekubectl.RunKubectl(
+					"default", "delete", "node", orphanNodeName,
+					"--ignore-not-found=true", "--wait=false",
+				)
+				return err
+			})
 
-			framework.ExpectNoError(setHostCIDRs(""), "Failed to remove host-cidrs annotation from node %s", nodeToOrphan)
+			ginkgo.By("Waiting for cluster-manager to observe the orphan node")
+			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+				node, err := f.ClientSet.CoreV1().Nodes().Get(
+					context.TODO(), orphanNodeName, metav1.GetOptions{})
+				if err != nil {
+					framework.Logf(
+						"Failed to read orphan node %s while waiting for cluster-manager to observe it: %v",
+						orphanNodeName, err,
+					)
+					return false, nil
+				}
+				return node.Annotations[util.OvnNodeID] != "", nil
+			})
+			framework.ExpectNoError(err,
+				"Cluster-manager did not observe orphan node %s", orphanNodeName)
 
-			// Register node annotation restore immediately
-			defer func() {
-				framework.ExpectNoError(setHostCIDRs(originalHostCIDRs),
-					"Failed to restore host-cidrs annotation on node %s", nodeToOrphan)
-			}()
+			ginkgo.By("Waiting for the EgressIP controller to process the orphan node")
+			controlPlaneNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+			controllerLogStart := time.Now().Add(-retryTimeout - time.Minute)
+			expectedControllerLog := fmt.Sprintf(
+				"Node %s is not egress-assignable: failed to parse host-cidrs", orphanNodeName)
+			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+				controlPlanePods, err := f.ClientSet.CoreV1().Pods(controlPlaneNamespace).List(
+					context.TODO(), metav1.ListOptions{LabelSelector: "name=ovnkube-control-plane"})
+				if err != nil {
+					framework.Logf("Failed to list ovnkube-control-plane pods while waiting for the EgressIP controller: %v", err)
+					return false, nil
+				}
+				for _, controlPlanePod := range controlPlanePods.Items {
+					logs, err := pod.GetPodLogsSince(context.TODO(), f.ClientSet, controlPlaneNamespace,
+						controlPlanePod.Name, "ovnkube-cluster-manager", controllerLogStart)
+					if err != nil {
+						framework.Logf("Failed to read EgressIP controller logs from pod %s: %v", controlPlanePod.Name, err)
+						continue
+					}
+					if strings.Contains(logs, expectedControllerLog) {
+						return true, nil
+					}
+				}
+				return false, nil
+			})
+			framework.ExpectNoError(err,
+				"EgressIP controller did not process orphan node %s", orphanNodeName)
 
 			egressIPConfig1 := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressIP
@@ -4073,32 +4128,24 @@ spec:
 				return assigned
 			}
 
-			// The orphaned state cannot be held open for a fixed window:
-			// ovnkube-node's address manager restores host-cidrs on any netlink
-			// address event, not only on its sync ticker, and IPv6 links produce
-			// enough address activity that the annotation can come back within
-			// seconds. So assert as soon as both EgressIPs are assigned, and
-			// re-check the annotation on every poll: if it returns before the
-			// assignments land, the run has not exercised the orphaned state and
-			// must fail loudly rather than pass without testing anything.
 			ginkgo.By("Verifying both EgressIPs are assigned while one node is orphaned")
 			var assigned map[string]string
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-				orphanNode, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodeToOrphan, metav1.GetOptions{})
-				if err != nil {
-					return false, err
-				}
-				if _, ok := orphanNode.Annotations[util.OVNNodeHostCIDRs]; ok {
-					return false, fmt.Errorf("node %s regained its host-cidrs annotation before both EgressIPs were assigned, so the orphaned state was not exercised", nodeToOrphan)
-				}
 				assigned = assignedNodes()
 				framework.Logf("Current EgressIP assignments: %v", assigned)
+
+				for egressIPName, nodeName := range assigned {
+					if nodeName == orphanNodeName {
+						return false, fmt.Errorf(
+							"EgressIP %s was assigned to orphan node %s",
+							egressIPName, orphanNodeName,
+						)
+					}
+				}
 				return len(assigned) == 2, nil
 			})
-			framework.ExpectNoError(err, "Both EgressIPs should have been assigned while node %s was orphaned", nodeToOrphan)
-
-			gomega.Expect(assigned).NotTo(gomega.ContainElement(nodeToOrphan),
-				"EgressIPs must not be assigned to node %s while its host-cidrs annotation is missing", nodeToOrphan)
+			framework.ExpectNoError(err,
+				"Both EgressIPs should have been assigned despite orphan node %s", orphanNodeName)
 		})
 
 		ginkgo.It("should prevent duplicate MAC responses when egress node is rebooted", func() {
