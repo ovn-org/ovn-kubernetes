@@ -18,6 +18,68 @@ OVN should work with any supported OVS release, extra requirements for OVS versi
 Some of the requirements are feature-specific.
 
 ## UDN
+
+### Masquerade Subnet Sizing
+
+When UserDefinedNetworks are in use, the `internalMasqueradeSubnet` (IPv4) and
+`internalMasqueradeV6Subnet` (IPv6) must be large enough to accommodate the maximum
+number of concurrent networks (`MaxNetworks = 4096`).
+
+The masquerade IP index formula (from `go-controller/pkg/generator/udn/masquerade_ips.go`):
+
+```text
+GatewayRouter  index = 10 + networkID × 2 − 1
+ManagementPort index = 10 + networkID × 2
+```
+
+For `networkID = MaxNetworks = 4096`, the highest index is `8202`. The subnet must
+contain at least `8203` IPs. Max safe networkID = `floor((subnet_size - 1 - 10) / 2)`.
+
+**IPv4 sizing:**
+
+| IPv4 Subnet | IPs    | Max safe networkID | Safe with MaxNetworks=4096? |
+|-------------|--------|-------------------|----------------------------|
+| /29         | 8      | 0                 | NO — cannot fit 1 UDN       |
+| /24         | 256    | 122               | NO — crashes after ~122 total creates |
+| /20         | 4096   | 2042              | NO — crashes after ~2042 total creates |
+| /19         | 8192   | 4090              | NO — max index 8202 > 8191  |
+| **/18**     | 16384  | 8186              | **YES — minimum safe size** |
+| /17         | 32768  | 16378             | YES — recommended            |
+
+**Recommendation:** Use `/17` for IPv4 (`169.254.0.0/17`). The `/17` range
+(`169.254.0.0–169.254.127.255`) is chosen to avoid overlapping with the cloud
+metadata IP `169.254.169.254`.
+
+**IPv6 sizing:**
+
+The same formula applies to `internalMasqueradeV6Subnet`. The default `fd69::/125`
+(8 IPs) is insufficient for any UDN.
+
+| IPv6 Prefix | IPs    | Max safe networkID | Safe with MaxNetworks=4096? |
+|-------------|--------|-------------------|----------------------------|
+| /125        | 8      | 0                 | NO — cannot fit 1 UDN       |
+| /117        | 2048   | 1019              | NO — crashes after ~1019 total creates |
+| /115        | 8192   | 4090              | NO — max index 8202 > 8191  |
+| **/114**    | 16384  | 8186              | **YES — minimum safe size** |
+| /113        | 32768  | 16378             | YES — recommended            |
+
+**Recommendation:** Use `/113` for IPv6. Update the `--gateway-v6-masquerade-subnet`
+flag at ovnkube startup (or the equivalent operator field) and restart ovnkube-node pods.
+
+**Note on the 4096 limit:** `MaxNetworks = 4096` is tied to OVN's transit switch
+tunnel key reservation. OVN reserves a deterministic key at
+`BaseTransitSwitchTunnelKey + networkID` for each network's transit switch, with
+exactly 4096 slots reserved at the top of the 24-bit key space. See
+[ovn-util.h](https://github.com/ovn-org/ovn/blob/cfaf849c034469502fc97149f20676dec4d76595/lib/ovn-util.h#L159-L164).
+
+**Existing deployments with a small subnet:** If your deployment was configured with
+a masquerade subnet smaller than `/18` (IPv4) or `/114` (IPv6), update it before
+creating UDNs. The relevant flags are `--gateway-v4-masquerade-subnet` and
+`--gateway-v6-masquerade-subnet` (passed to `ovnkube` at startup). After changing,
+restart ovnkube-node pods to pick up the new values.
+
+### Kubelet Network Probes
+
 For kubelet network probes to work with UDN pods, the following are required:
 - kernel fix 7f3287db654395f9c5ddd246325ff7889f550286: netfilter: nft_socket: make cgroupsv2 matching work with namespaces)
 
