@@ -33,7 +33,7 @@ func (c *Controller) repairNetworkQoSes() error {
 	// delete stale ovn qos objects owned by NetworkQoS
 	if err := libovsdbops.DeleteQoSesWithPredicate(c.nbClient, func(qos *nbdb.QoS) bool {
 		if qos.ExternalIDs[libovsdbops.OwnerControllerKey.String()] != c.controllerName ||
-			qos.ExternalIDs[libovsdbops.OwnerTypeKey.String()] == string(libovsdbops.NetworkQoSOwnerType) {
+			qos.ExternalIDs[libovsdbops.OwnerTypeKey.String()] != string(libovsdbops.NetworkQoSOwnerType) {
 			return false
 		}
 		objName := qos.ExternalIDs[libovsdbops.ObjectNameKey.String()]
