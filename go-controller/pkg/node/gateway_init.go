@@ -491,6 +491,31 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP ne
 	return nil
 }
 
+// dpuHostPrimaryAddresses returns the primary gateway interface addresses on a
+// DPU host node.
+func dpuHostPrimaryAddresses() ([]net.IP, error) {
+	if config.Gateway.Interface == "" {
+		return nil, nil
+	}
+	ifAddrs, err := nodeutil.GetNetworkInterfaceIPAddresses(config.Gateway.Interface)
+	if err != nil {
+		return nil, fmt.Errorf("get DPU host primary addresses from %s: %w", config.Gateway.Interface, err)
+	}
+	return gatewayIPsFromIPNets(ifAddrs), nil
+}
+
+func syncDPUHostNodePortAllowedAddresses(nodeIPManager *addressManager) error {
+	hostAddresses, _ := nodeIPManager.ListAddresses()
+	primaryAddresses, err := dpuHostPrimaryAddresses()
+	if err != nil {
+		return fmt.Errorf("get DPU host primary addresses for NodePort filtering: %w", err)
+	}
+	if err := SyncNodePortAllowedAddresses(hostAddresses, primaryAddresses); err != nil {
+		return fmt.Errorf("sync NodePort allowed addresses on DPU host: %w", err)
+	}
+	return nil
+}
+
 func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 	// A DPU host gateway is complementary to the shared gateway running
 	// on the DPU embedded CPU. it performs some initializations and
@@ -510,6 +535,14 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 				return fmt.Errorf("unable to configure UDN nftables: %w", err)
 			}
 		}
+		if err := syncDPUHostNodePortAllowedAddresses(gw.nodeIPManager); err != nil {
+			return err
+		}
+		gw.nodeIPManager.AddOnAddressesChangedHandler(func() {
+			if err := syncDPUHostNodePortAllowedAddresses(gw.nodeIPManager); err != nil {
+				klog.Errorf("Failed to sync NodePort allowed addresses after address change: %v", err)
+			}
+		})
 		gw.nodePortWatcherNFTables = newNodePortWatcherNFTables(nc.networkManager)
 		gw.loadBalancerHealthChecker = newLoadBalancerHealthChecker(nc.name, nc.watchFactory)
 		portClaimWatcher, err := newPortClaimWatcher(nc.recorder)

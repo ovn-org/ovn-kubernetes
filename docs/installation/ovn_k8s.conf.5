@@ -171,6 +171,13 @@ This is the VLAN tag to apply to traffic exiting the OVN logical network in
 "shared" mode. A value of 0 means traffic should be untagged.
 \fBnodeport\fR=true
 When set to true Kubernetes NodePort services will be supported.
+\fBnodeport-addresses\fR=
+Comma-separated list of CIDRs and/or the keyword \fBprimary\fR that restrict
+which local node IPs may receive NodePort traffic. When unset, NodePort traffic
+is accepted on all local node IPs. Use \fBprimary\fR to allow only the gateway
+interface addresses. Example dual-stack configuration:
+\fBnodeport-addresses\fR=10.0.0.0/8,2001:db8::/32,primary
+Invalid CIDR values or an empty-only value are rejected at startup.
 
 .SH "SEE ALso"
 .BR ovnkube (1),

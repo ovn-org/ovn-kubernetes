@@ -165,12 +165,25 @@ func configureUDNServicesNFTables() error {
 		Type:    "ipv6_addr . inet_proto . inet_service : verdict",
 	})
 
-	tx.Add(&knftables.Rule{
-		Chain: nftablesUDNServiceMarkChain,
-		Rule: knftables.Concat(
-			"fib daddr type local meta l4proto . th dport vmap", "@", nftablesUDNMarkNodePortsMap,
-		),
-	})
+	if nodePortAddressesRestricted() {
+		tx.Add(&knftables.Rule{
+			Chain: nftablesUDNServiceMarkChain,
+			Rule: nftConcat(append(nodePortLocalDestMatch(false),
+				"meta l4proto . th dport vmap", "@", nftablesUDNMarkNodePortsMap)...),
+		})
+		tx.Add(&knftables.Rule{
+			Chain: nftablesUDNServiceMarkChain,
+			Rule: nftConcat(append(nodePortLocalDestMatch(true),
+				"meta l4proto . th dport vmap", "@", nftablesUDNMarkNodePortsMap)...),
+		})
+	} else {
+		tx.Add(&knftables.Rule{
+			Chain: nftablesUDNServiceMarkChain,
+			Rule: knftables.Concat(
+				"fib daddr type local meta l4proto . th dport vmap", "@", nftablesUDNMarkNodePortsMap,
+			),
+		})
+	}
 	tx.Add(&knftables.Rule{
 		Chain: nftablesUDNServiceMarkChain,
 		Rule: knftables.Concat(
@@ -244,6 +257,29 @@ func (npw *nodePortWatcher) updateGatewayIPs() {
 	defer npw.gatewayIPLock.Unlock()
 	npw.gatewayIPv4 = gatewayIPv4
 	npw.gatewayIPv6 = gatewayIPv6
+}
+
+func (npw *nodePortWatcher) syncNodePortAllowedAddresses() error {
+	if npw.nodeIPManager == nil || npw.gwBridge == nil {
+		return nil
+	}
+	hostAddresses, _ := npw.nodeIPManager.ListAddresses()
+	primaryAddresses := gatewayIPsFromIPNets(npw.gwBridge.GetIPs())
+	if err := SyncNodePortAllowedAddresses(hostAddresses, primaryAddresses); err != nil {
+		return fmt.Errorf("sync NodePort allowed addresses for node port watcher: %w", err)
+	}
+	return nil
+}
+
+// gatewayIPsFromIPNets extracts IP addresses from a slice of IP networks.
+func gatewayIPsFromIPNets(addrs []*net.IPNet) []net.IP {
+	ips := make([]net.IP, 0, len(addrs))
+	for _, addr := range addrs {
+		if addr != nil {
+			ips = append(ips, addr.IP)
+		}
+	}
+	return ips
 }
 
 // updateServiceFlowCache handles managing breth0 gateway flows for ingress traffic towards kubernetes services
@@ -1777,6 +1813,9 @@ func newGateway(
 			if gw.nodePortWatcher != nil {
 				npw, _ := gw.nodePortWatcher.(*nodePortWatcher)
 				npw.updateGatewayIPs()
+				if err := npw.syncNodePortAllowedAddresses(); err != nil {
+					klog.Errorf("Failed to sync NodePort allowed addresses after address change: %v", err)
+				}
 			}
 			// Services create OpenFlow flows as well, need to update them all
 			if gw.servicesRetryFramework != nil {
@@ -1870,6 +1909,9 @@ func newNodePortWatcher(
 		ofm:            ofm,
 		watchFactory:   watchFactory,
 		networkManager: networkManager,
+	}
+	if err := npw.syncNodePortAllowedAddresses(); err != nil {
+		return nil, fmt.Errorf("initialize NodePort allowed addresses: %w", err)
 	}
 	return npw, nil
 }

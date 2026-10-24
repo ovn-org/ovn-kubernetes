@@ -63,6 +63,11 @@ DEPRECATED; use \fB\--gateway-mode\fR instead.
 Setup nodeport based entries in OVN gateways for ingress into the k8s cluster.
 By default, it is disabled.
 .TP
+\fB\--nodeport-addresses\fR string
+Comma-separated CIDRs and/or the keyword \fBprimary\fR that restrict which local
+node IPs may receive NodePort traffic. When unset, NodePort traffic is accepted
+on all local node IPs.
+.TP
 \fB\--gateway-v4-join-subnet\fR string
 The v4 join subnet to use for assigning join switch IPv4 addresses\fR.
 .TP

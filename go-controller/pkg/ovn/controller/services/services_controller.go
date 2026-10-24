@@ -886,6 +886,7 @@ func (c *Controller) syncNodeInfoMapForNetwork(state *networkState, nodeInfoByNa
 					nodeInfo.hostAddresses, nodeInfo.name, state.netInfo.GetNetworkName(), err)
 				validNodeInfo = false
 			} else {
+				ips = globalconfig.Gateway.NodePortAddresses.FilterHostAddresses(ips, nodeInfo.l3gatewayAddresses)
 				for _, ip := range ips {
 					state.nodeIPv4Templates.AddIP(nodeInfo.chassisID, ip)
 				}
@@ -898,6 +899,7 @@ func (c *Controller) syncNodeInfoMapForNetwork(state *networkState, nodeInfoByNa
 				klog.Warningf("Error while searching for IPv6 host addresses in %v for node[%s] for network=%s: %v",
 					nodeInfo.hostAddresses, nodeInfo.name, state.netInfo.GetNetworkName(), err)
 			} else {
+				ips = globalconfig.Gateway.NodePortAddresses.FilterHostAddresses(ips, nodeInfo.l3gatewayAddresses)
 				for _, ip := range ips {
 					state.nodeIPv6Templates.AddIP(nodeInfo.chassisID, ip)
 				}

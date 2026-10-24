@@ -612,6 +612,12 @@ type GatewayConfig struct {
 	VLANID uint `gcfg:"vlan-id"`
 	// NodeportEnable sets whether to provide Kubernetes NodePort service or not
 	NodeportEnable bool `gcfg:"nodeport"`
+	// RawNodePortAddresses is a comma-separated list of CIDRs and/or the keyword
+	// "primary" that restrict which local node IPs may receive NodePort traffic.
+	// When empty, NodePort traffic is accepted on all local node IPs.
+	RawNodePortAddresses string `gcfg:"nodeport-addresses"`
+	// NodePortAddresses holds the parsed nodeport-addresses configuration.
+	NodePortAddresses *NodePortAddressConfig
 	// DisableSNATMultipleGws sets whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs
 	// only applicable to the default network not for UDNs
 	DisableSNATMultipleGWs bool `gcfg:"disable-snat-multiple-gws"`
@@ -1728,6 +1734,13 @@ var OVNGatewayFlags = []cli.Flag{
 		Usage:       "Setup nodeport based ingress on gateways.",
 		Destination: &cliConfig.Gateway.NodeportEnable,
 	},
+	&cli.StringFlag{
+		Name: "nodeport-addresses",
+		Usage: "Comma-separated CIDRs and/or the keyword \"primary\" that restrict " +
+			"which local node IPs may receive NodePort traffic. When unset, NodePort " +
+			"traffic is accepted on all local node IPs.",
+		Destination: &cliConfig.Gateway.RawNodePortAddresses,
+	},
 	&cli.BoolFlag{
 		Name:        "disable-snat-multiple-gws",
 		Usage:       "Disable SNAT for egress traffic with multiple gateways.",
@@ -2358,6 +2371,11 @@ func completeGatewayConfig(allSubnets *ConfigSubnets, masqueradeIPs *MasqueradeI
 
 	allSubnets.Append(ConfigSubnetMasquerade, v4MasqueradeCIDR)
 	allSubnets.Append(ConfigSubnetMasquerade, v6MasqueradeCIDR)
+
+	Gateway.NodePortAddresses, err = ParseNodePortAddresses(Gateway.RawNodePortAddresses)
+	if err != nil {
+		return fmt.Errorf("invalid nodeport-addresses: %w", err)
+	}
 
 	return nil
 }

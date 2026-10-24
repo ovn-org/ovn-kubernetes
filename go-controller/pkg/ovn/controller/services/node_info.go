@@ -44,6 +44,17 @@ func (ni *nodeInfo) hostAddressesStr() []string {
 	return out
 }
 
+// nodePortHostAddressesStr returns the node host addresses that may receive
+// NodePort traffic after applying the nodeport-addresses policy.
+func (ni *nodeInfo) nodePortHostAddressesStr() []string {
+	filtered := globalconfig.Gateway.NodePortAddresses.FilterHostAddresses(ni.hostAddresses, ni.l3gatewayAddresses)
+	out := make([]string, 0, len(filtered))
+	for _, ip := range filtered {
+		out = append(out, ip.String())
+	}
+	return out
+}
+
 func (ni *nodeInfo) l3gatewayAddressesStr() []string {
 	out := make([]string, 0, len(ni.l3gatewayAddresses))
 	for _, ip := range ni.l3gatewayAddresses {

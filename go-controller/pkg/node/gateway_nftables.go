@@ -36,6 +36,9 @@ const (
 	nftablesETPNodePortsV4 = "nodeports-etp-local-v4"
 	nftablesETPNodePortsV6 = "nodeports-etp-local-v6"
 
+	nftablesNodePortAllowedV4 = "nodeport-allowed-v4"
+	nftablesNodePortAllowedV6 = "nodeport-allowed-v6"
+
 	nftablesExternalIPsV4    = "external-ips-v4"
 	nftablesExternalIPsV6    = "external-ips-v6"
 	nftablesETPExternalIPsV4 = "external-ips-etp-local-v4"
@@ -48,6 +51,82 @@ const (
 	nftablesITPServicesMapV4 = "itp-services-to-redirect-v4"
 	nftablesITPServicesMapV6 = "itp-services-to-redirect-v6"
 )
+
+// nodePortAddressesRestricted reports whether NodePort traffic is limited to
+// specific local node IP addresses.
+func nodePortAddressesRestricted() bool {
+	return config.Gateway.NodePortAddresses != nil && config.Gateway.NodePortAddresses.Restricted()
+}
+
+// addNodePortAllowedAddressSets creates nftables sets that hold the local node
+// IPs allowed to receive NodePort traffic.
+func addNodePortAllowedAddressSets(tx *knftables.Transaction) {
+	tx.Add(&knftables.Set{
+		Name:    nftablesNodePortAllowedV4,
+		Type:    "ipv4_addr",
+		Comment: knftables.PtrTo("Local node IPs allowed to receive NodePort traffic"),
+	})
+	tx.Flush(&knftables.Set{Name: nftablesNodePortAllowedV4})
+	tx.Add(&knftables.Set{
+		Name:    nftablesNodePortAllowedV6,
+		Type:    "ipv6_addr",
+		Comment: knftables.PtrTo("Local node IPs allowed to receive NodePort traffic"),
+	})
+	tx.Flush(&knftables.Set{Name: nftablesNodePortAllowedV6})
+}
+
+// nodePortLocalDestMatch returns the nftables destination match for NodePort
+// traffic, optionally restricted to allowed local addresses.
+func nodePortLocalDestMatch(isIPv6 bool) []string {
+	if !nodePortAddressesRestricted() {
+		return []string{"fib daddr type local"}
+	}
+	if isIPv6 {
+		return []string{"fib daddr type local", "ip6 daddr", "@", nftablesNodePortAllowedV6}
+	}
+	return []string{"fib daddr type local", "ip daddr", "@", nftablesNodePortAllowedV4}
+}
+
+// nftConcat builds an nftables concatenation expression from string parts.
+func nftConcat(parts ...string) string {
+	args := make([]interface{}, len(parts))
+	for i, part := range parts {
+		args[i] = part
+	}
+	return knftables.Concat(args...)
+}
+
+// SyncNodePortAllowedAddresses updates the nftables sets that restrict which
+// local node IPs may receive NodePort traffic.
+func SyncNodePortAllowedAddresses(hostAddresses, primaryAddresses []net.IP) error {
+	if !nodePortAddressesRestricted() {
+		return nil
+	}
+
+	filtered := config.Gateway.NodePortAddresses.FilterHostAddresses(hostAddresses, primaryAddresses)
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
+		return fmt.Errorf("get nftables helper for NodePort allowed addresses: %w", err)
+	}
+
+	tx := nft.NewTransaction()
+	tx.Flush(&knftables.Set{Name: nftablesNodePortAllowedV4})
+	tx.Flush(&knftables.Set{Name: nftablesNodePortAllowedV6})
+	for _, ip := range filtered {
+		if ip == nil {
+			continue
+		}
+		if utilnet.IsIPv6(ip) {
+			tx.Add(&knftables.Element{Set: nftablesNodePortAllowedV6, Key: []string{ip.String()}})
+		} else {
+			tx.Add(&knftables.Element{Set: nftablesNodePortAllowedV4, Key: []string{ip.String()}})
+		}
+	}
+	if err := nft.Run(context.TODO(), tx); err != nil {
+		return fmt.Errorf("sync NodePort allowed addresses: %w", err)
+	}
+	return nil
+}
 
 // initGatewayNFTables initializes chains/sets/maps used for Service proxying rules.
 //
@@ -154,6 +233,9 @@ func initGatewayNFTables() error {
 		Type:    "inet_proto . inet_service : ipv6_addr . inet_service",
 		Comment: knftables.PtrTo("DNAT mappings for IPv6 NodePort traffic with ExternalTrafficPolicy: Local"),
 	})
+	if nodePortAddressesRestricted() {
+		addNodePortAllowedAddressSets(tx)
+	}
 	tx.Add(&knftables.Rule{
 		Chain: "services-etp",
 		Rule: knftables.Concat(
@@ -170,19 +252,15 @@ func initGatewayNFTables() error {
 	})
 	tx.Add(&knftables.Rule{
 		Chain: "services-etp",
-		Rule: knftables.Concat(
-			"fib daddr type local",
+		Rule: nftConcat(append(nodePortLocalDestMatch(false),
 			"dnat ip addr . port to",
-			"meta l4proto . th dport map", "@", nftablesETPNodePortsV4,
-		),
+			"meta l4proto . th dport map", "@", nftablesETPNodePortsV4)...),
 	})
 	tx.Add(&knftables.Rule{
 		Chain: "services-etp",
-		Rule: knftables.Concat(
-			"fib daddr type local",
+		Rule: nftConcat(append(nodePortLocalDestMatch(true),
 			"dnat ip6 addr . port to",
-			"meta l4proto . th dport map", "@", nftablesETPNodePortsV6,
-		),
+			"meta l4proto . th dport map", "@", nftablesETPNodePortsV6)...),
 	})
 
 	// Create the maps and rules for ordinary (ETP:Cluster) services
@@ -223,19 +301,15 @@ func initGatewayNFTables() error {
 	})
 	tx.Add(&knftables.Rule{
 		Chain: "services",
-		Rule: knftables.Concat(
-			"fib daddr type local",
+		Rule: nftConcat(append(nodePortLocalDestMatch(false),
 			"dnat ip addr . port to",
-			"meta l4proto . th dport map", "@", nftablesNodePortsV4,
-		),
+			"meta l4proto . th dport map", "@", nftablesNodePortsV4)...),
 	})
 	tx.Add(&knftables.Rule{
 		Chain: "services",
-		Rule: knftables.Concat(
-			"fib daddr type local",
+		Rule: nftConcat(append(nodePortLocalDestMatch(true),
 			"dnat ip6 addr . port to",
-			"meta l4proto . th dport map", "@", nftablesNodePortsV6,
-		),
+			"meta l4proto . th dport map", "@", nftablesNodePortsV6)...),
 	})
 
 	// Add the remaining chains/sets/maps for InternalTrafficPolicy: Local.
