@@ -386,7 +386,7 @@ func (nb *northBoundClient) createOrUpdateBFDStaticRoute(bfdEnabled bool, gw str
 			item.Nexthop == lrsr.Nexthop &&
 			item.OutputPort != nil &&
 			*item.OutputPort == *lrsr.OutputPort &&
-			item.Policy == lrsr.Policy
+			libovsdbops.PolicyEqualPredicate(item.Policy, lrsr.Policy)
 	}
 	ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nb.nbClient, ops, gr, &lrsr, p,
 		&lrsr.Options)
