@@ -874,14 +874,14 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		emptyAS, _ := addressset.GetTestDbAddrSets(hostNSASIDs, []string{})
 		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
 		// this is calculated based on node-id
-		gwIP1 := "100.64.0.1"
+		gwIP1 := "100.64.0.4"
 
 		testNode := corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":\"%s\"}", node1Subnet),
-					"k8s.ovn.org/node-id":      "1",
+					"k8s.ovn.org/node-id":      "4",
 				},
 			},
 		}
@@ -938,13 +938,13 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 	ginkgo.It("updates IPs for existing nodes when the host network traffic namespace is created", func() {
 		config.Kubernetes.HostNetworkNamespace = "ovn-host-network"
 		// this is calculated based on node-id
-		gwIP1 := "100.64.0.1"
+		gwIP1 := "100.64.0.4"
 		testNode := corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":\"%s\"}", node1Subnet),
-					"k8s.ovn.org/node-id":      "1",
+					"k8s.ovn.org/node-id":      "4",
 				},
 			},
 		}
@@ -1024,14 +1024,14 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
 
 		// this is calculated based on node-id
-		gwIP := "100.64.0.1"
+		gwIP := "100.64.0.4"
 		// Create node that doesn't match hybrid overlay selector, it should be added to HostNetworkNamespace address set
 		testNode := corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":\"%s\"}", node1Subnet),
-					"k8s.ovn.org/node-id":      "1",
+					"k8s.ovn.org/node-id":      "4",
 				},
 			},
 		}

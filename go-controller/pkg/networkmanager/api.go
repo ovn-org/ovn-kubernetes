@@ -24,11 +24,6 @@ import (
 
 var ErrNetworkControllerTopologyNotManaged = errors.New("no cluster network controller to manage topology")
 
-const (
-	// MaxNetworks is the maximum number of networks allowed.
-	MaxNetworks = 4096
-)
-
 // NADReconciler is a level-driven controller notified of NAD key changes.
 type NADReconciler controller.Reconciler
 

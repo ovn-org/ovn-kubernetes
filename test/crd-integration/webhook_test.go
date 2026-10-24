@@ -20,7 +20,11 @@ func TestPodWebhookSelfExclusion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read Helm template for pod webhook match condition: %v", err)
 	}
-	_, expression, found := strings.Cut(string(template), "expression: >-")
+	_, podWebhook, found := strings.Cut(string(template), "name: ovn-kubernetes-admission-webhook-pod\n")
+	if !found {
+		t.Fatal("missing pod webhook")
+	}
+	_, expression, found := strings.Cut(podWebhook, "expression: >-")
 	if !found {
 		t.Fatal("missing match condition")
 	}

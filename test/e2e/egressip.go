@@ -35,8 +35,10 @@ import (
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -4008,7 +4010,6 @@ spec:
 					Labels: map[string]string{
 						"k8s.ovn.org/egress-assignable": "dummy",
 					},
-					Annotations: orphanNodeAnnotations,
 				},
 				Status: corev1.NodeStatus{
 					Conditions: []corev1.NodeCondition{
@@ -4027,6 +4028,25 @@ spec:
 				)
 				return err
 			})
+
+			// Protected annotations must be written by the trusted cluster-manager
+			// identity, which can patch nodes/status but cannot create Nodes.
+			clusterManagerConfig := rest.CopyConfig(f.ClientConfig())
+			clusterManagerConfig.Impersonate = rest.ImpersonationConfig{
+				UserName: fmt.Sprintf("system:serviceaccount:%s:ovnkube-cluster-manager",
+					deploymentconfig.Get().OVNKubernetesNamespace()),
+			}
+			clusterManagerClient, err := clientset.NewForConfig(clusterManagerConfig)
+			framework.ExpectNoError(err, "Failed to create cluster-manager impersonation client")
+			annotationPatch, err := json.Marshal(map[string]any{
+				"metadata": map[string]any{"annotations": orphanNodeAnnotations},
+			})
+			framework.ExpectNoError(err, "Failed to marshal orphan node annotations")
+			patchCtx, cancelPatch := context.WithTimeout(context.Background(), retryTimeout)
+			defer cancelPatch()
+			_, err = clusterManagerClient.CoreV1().Nodes().Patch(patchCtx, orphanNodeName,
+				k8stypes.MergePatchType, annotationPatch, metav1.PatchOptions{}, "status")
+			framework.ExpectNoError(err, "Failed to annotate orphan node %s", orphanNodeName)
 
 			ginkgo.By("Waiting for cluster-manager to observe the orphan node")
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {

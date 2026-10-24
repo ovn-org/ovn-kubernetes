@@ -240,13 +240,9 @@ func (c *Controller) initialSync() error {
 
 		// Restore tunnel key in allocator if present
 		if tunnelID > 0 {
-			// Reserve tunnel key in the allocator so it won't be re-allocated
-			// We already reserve the key from cluster manager sync in initTunnelKeysAllocator,
-			// but no harm in doing it again here for completeness.
-			if err := c.tunnelKeysAllocator.ReserveKeys(cnc.Name, []int{tunnelID}); err != nil {
+			// initTunnelKeysAllocator already reserved this key; this also supports standalone initialization.
+			if err := c.tunnelKeysAllocator.ReserveKeys(id.NetworkConnectTunnelKeyOwner(cnc.Name), []int{tunnelID}); err != nil {
 				klog.Warningf("Failed to restore tunnel key %d for CNC %s: %v", tunnelID, cnc.Name, err)
-			} else {
-				klog.V(4).Infof("Restored tunnel key %d for CNC %s", tunnelID, cnc.Name)
 			}
 		}
 
@@ -290,10 +286,8 @@ func cncNeedsUpdate(oldObj, newObj *networkconnectv1.ClusterNetworkConnect) bool
 		return true
 	}
 	// Case 3: CNC is being updated
-	// Only trigger updates when the Spec.NetworkSelectors changes
-	// We only need to check for selector changes
-	// and don't need to react on connectivity enabled field changes
-	// from cluster manager.
+	// The tunnel key is immutable once set; only selector changes need reconciliation.
+	// Cluster manager doesn't need to react to connectivity enabled changes.
 	// connectSubnet is immutable so that can't change after creation.
 	return !reflect.DeepEqual(oldObj.Spec.NetworkSelectors, newObj.Spec.NetworkSelectors)
 }

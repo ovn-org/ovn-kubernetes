@@ -264,3 +264,58 @@ func TestReserveIDsOutOfRange(t *testing.T) {
 		})
 	}
 }
+
+func TestTunnelKeysAllocatorRollbackPreservesExistingKeys(t *testing.T) {
+	allocator := NewTunnelKeyAllocator("test")
+	existing := []int{16715790}
+	if err := allocator.ReserveKeys("network", existing); err != nil {
+		t.Fatal(err)
+	}
+	keys, rollback, err := allocator.AllocateKeysWithRollback("network", 5000, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollback()
+	if err := allocator.ReserveKeys("other", existing); err == nil {
+		t.Fatal("rollback released an existing key")
+	}
+	if err := allocator.ReserveKeys("other", keys[1:]); err != nil {
+		t.Fatalf("rollback retained a newly allocated key: %v", err)
+	}
+	keys, err = allocator.AllocateKeys("network", 5000, 1)
+	if err != nil || !slices.Equal(keys, existing) {
+		t.Fatalf("existing reservation changed: keys=%v, err=%v", keys, err)
+	}
+}
+
+// GetKeys returns a copy of the dynamic keys currently owned by name, or nil
+// when none are reserved. Transit switch keys derived from network IDs are not
+// tracked by the allocator and are excluded from the result.
+func (allocator *TunnelKeysAllocator) GetKeys(name string) []int {
+	allocator.idsAllocator.nameIdsMap.LockKey(name)
+	defer allocator.idsAllocator.nameIdsMap.UnlockKey(name)
+	keys, _ := allocator.idsAllocator.nameIdsMap.Load(name)
+	return slices.Clone(keys)
+}
+
+func TestTunnelKeysAllocatorGetKeys(t *testing.T) {
+	allocator := NewTunnelKeyAllocator("test")
+	if keys := allocator.GetKeys("missing"); keys != nil {
+		t.Fatalf("unexpected allocation: %v", keys)
+	}
+	expected := []int{16715790}
+	if err := allocator.ReserveKeys("network", []int{16711684, expected[0]}); err != nil {
+		t.Fatal(err)
+	}
+	keys := allocator.GetKeys("network")
+	if !slices.Equal(keys, expected) {
+		t.Fatalf("unexpected dynamic keys: %v", keys)
+	}
+	keys[0]++
+	if keys := allocator.GetKeys("network"); !slices.Equal(keys, expected) {
+		t.Fatalf("lookup exposed mutable allocator state: %v", keys)
+	}
+	if err := allocator.ReserveKeys("other", []int{16715779}); err != nil {
+		t.Fatalf("lookup unexpectedly allocated a key: %v", err)
+	}
+}

@@ -26,12 +26,38 @@ webhooks:
       caBundle: {{ $ca.Cert | b64enc | quote }}
     admissionReviewVersions: ['v1']
     sideEffects: None
+    failurePolicy: Fail
+    matchConditions:
+      # Check all node credentials to enforce metadata/status restrictions.
+      # Other callers need validation only when OVN annotations change.
+      - name: ovn-node-or-annotation-change
+        expression: >-
+          request.userInfo.username.startsWith('system:ovn-node') ||
+          (has(object.metadata.annotations) &&
+           object.metadata.annotations.exists(key,
+             key.startsWith('k8s.ovn.org/') &&
+             (oldObject == null ||
+              !has(oldObject.metadata.annotations) ||
+              !(key in oldObject.metadata.annotations) ||
+              object.metadata.annotations[key] != oldObject.metadata.annotations[key]))) ||
+          (oldObject != null && has(oldObject.metadata.annotations) &&
+           oldObject.metadata.annotations.exists(key,
+             key.startsWith('k8s.ovn.org/') &&
+             (!has(object.metadata.annotations) ||
+              !(key in object.metadata.annotations))))
     rules:
+      # Callers can supply protected annotations when registering a Node or
+      # change them through the main Node resource, bypassing nodes/status checks.
+      - operations: [ "CREATE", "UPDATE" ]
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["nodes"]
+        scope: "Cluster"
       - operations: [ "UPDATE" ]
-        apiGroups: ["*"]
-        apiVersions: ["*"]
-        resources: ["nodes/status"] # Using /status subresource doesn't protect from other users changing the annotations
-        scope: "*"
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["nodes/status"]
+        scope: "Cluster"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration

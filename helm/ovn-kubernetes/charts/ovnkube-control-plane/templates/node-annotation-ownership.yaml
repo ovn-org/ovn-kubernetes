@@ -21,7 +21,9 @@ spec:
     - name: annotationOwners
       expression: >-
         {
-          "k8s.ovn.org/node-subnets": {{ list $clusterManager | toJson }}{{- if $hybridOverlayEnabled }},
+          "k8s.ovn.org/node-subnets": {{ list $clusterManager | toJson }},
+          "k8s.ovn.org/node-id": {{ list $clusterManager | toJson }},
+          "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": {{ list $clusterManager | toJson }}{{- if $hybridOverlayEnabled }},
           "k8s.ovn.org/hybrid-overlay-node-subnet": {{ $hybridOverlayWriters | toJson }}
           {{- end }}
         }

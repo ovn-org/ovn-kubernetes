@@ -1912,7 +1912,8 @@ var (
 )
 
 func getEgressIPMarkAllocator() id.Allocator {
-	return id.NewIDAllocator("eip_mark", eipMarkMax-eipMarkMin)
+	// the mark range is inclusive of both ends, see util.IsEgressIPMarkValid
+	return id.NewIDAllocator("eip_mark", eipMarkMax-eipMarkMin+1)
 }
 
 // getOrAllocMark allocates a new mark integer for name using round-robin strategy if none was already allocated for name otherwise

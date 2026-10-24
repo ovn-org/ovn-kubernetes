@@ -1,0 +1,39 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: ovn-controller-owned-nad-annotations
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["k8s.cni.cncf.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["network-attachment-definitions"]
+  validations:
+    - expression: >-
+        request.userInfo.username == "system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager" ||
+        ["k8s.ovn.org/network-id", "k8s.ovn.org/tunnel-keys"].all(annotation,
+          (request.operation == "UPDATE" && has(oldObject.metadata.annotations) &&
+           annotation in oldObject.metadata.annotations)
+            ? (has(object.metadata.annotations) &&
+               annotation in object.metadata.annotations &&
+               oldObject.metadata.annotations[annotation] == object.metadata.annotations[annotation])
+            : (!has(object.metadata.annotations) ||
+               !(annotation in object.metadata.annotations)))
+      message: >-
+        Only cluster-manager may add, change, or remove the k8s.ovn.org/network-id and k8s.ovn.org/tunnel-keys annotations.
+      reason: Forbidden
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: ovn-controller-owned-nad-annotations
+spec:
+  policyName: ovn-controller-owned-nad-annotations
+  validationActions: [Deny]

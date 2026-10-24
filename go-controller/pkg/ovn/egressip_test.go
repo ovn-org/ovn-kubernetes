@@ -6676,7 +6676,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 	ginkgo.Context("WatchEgressNodes", func() {
 		ginkgo.DescribeTable("retries egress node setup after reroute setup failed", func(update bool) {
 			app.Action = func(*cli.Context) error {
-				node := getNodeObj(node1Name, map[string]string{util.OvnNodeID: "1"}, nil)
+				node := getNodeObj(node1Name, map[string]string{util.OvnNodeID: "4"}, nil)
 				fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{
 					NBData: []libovsdbtest.TestData{
 						&nbdb.LogicalRouter{

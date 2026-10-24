@@ -760,7 +760,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				Expect(clusterUDNVRFName(cudn, []netv1.NetworkAttachmentDefinition{nadWithMalformedID}, nil, true)).To(Equal("mp7-udn-vrf"),
 					"a malformed network-id annotation must be treated as unknown, not published")
 				nadWithOutOfRangeID := nadWithoutID
-				nadWithOutOfRangeID.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: fmt.Sprintf("%d", networkmanager.MaxNetworks)}
+				nadWithOutOfRangeID.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: fmt.Sprintf("%d", ovntypes.MaxNetworks)}
 				Expect(clusterUDNVRFName(cudn, []netv1.NetworkAttachmentDefinition{nadWithOutOfRangeID}, nil, true)).To(Equal("mp7-udn-vrf"),
 					"an annotation beyond the allocator's range must be treated as unknown, not published")
 				Expect(clusterUDNVRFName(cudn, nil, errors.New("sync failed"), true)).To(Equal("mp7-udn-vrf"),
@@ -770,7 +770,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				Expect(clusterUDNVRFName(cudn, nil, nil, false)).To(BeEmpty(),
 					"the name must clear once a successful sync leaves no NADs, since the released network ID may be reallocated")
 
-				Expect(len(util.GetCUDNVRFName(cudn.Name, networkmanager.MaxNetworks-1))).To(BeNumerically("<=", ovntypes.MaxInterfaceNameLength),
+				Expect(len(util.GetCUDNVRFName(cudn.Name, ovntypes.MaxNetworks-1))).To(BeNumerically("<=", ovntypes.MaxInterfaceNameLength),
 					"the highest allocatable network ID must derive a name within the device name length limit")
 
 				secondaryCUDN := testLayer2SecondaryClusterUDN("tenant-with-a-very-long-name")
