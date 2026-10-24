@@ -17,7 +17,41 @@ import (
 )
 
 // GetNetworkInterfaceIPAddresses returns the IP addresses for the network interface 'iface'.
+//
+// In shared / local gateway mode OVS takes over the user-configured gateway
+// interface and the host IP migrates from the slave port to the bridge's
+// internal port. Every caller of this function wants "the IPs the host has
+// on this gateway path", which after takeover live on the bridge, not on
+// the slave port. Translate iface to the bridge name before looking up IPs:
+//
+//   1. `port-to-br <iface>`        — covers the normal "OVS has the port
+//                                     attached right now" state.
+//   2. `GetBridgeName(iface)` plus  — covers a transient state where OVN-K
+//      `br-exists` check             cleanup has detached the port but the
+//                                     bridge survived with the host IP
+//                                     still on its internal port. Without
+//                                     this fallback, init paths like
+//                                     gateway_init.go:424 crash because
+//                                     `port-to-br` no longer finds the
+//                                     port and the slave port has no IP.
+//   3. neither found               — keep iface as-is (covers the initial
+//                                     boot state before OVS takes over,
+//                                     and legitimate non-OVS callers like
+//                                     the DPU-host kubernetes node
+//                                     interface).
+//
+// Doing the translation here covers all 6 callers of this function
+// (gateway_init.go, gateway_shared_intf.go, bridgeconfig.go) at once,
+// mirroring the existing translation in initGatewayPreStart
+// (gateway_init.go:84-90).
 func GetNetworkInterfaceIPAddresses(iface string) ([]*net.IPNet, error) {
+	if bridgeName, _, err := pkgutil.RunOVSVsctl("port-to-br", iface); err == nil && bridgeName != "" {
+		iface = bridgeName
+	} else if bridgeName := pkgutil.GetBridgeName(iface); bridgeName != "" {
+		if _, _, err := pkgutil.RunOVSVsctl("br-exists", bridgeName); err == nil {
+			iface = bridgeName
+		}
+	}
 	allIPs, err := pkgutil.GetFilteredInterfaceV4V6IPs(iface)
 	if err != nil {
 		return nil, fmt.Errorf("could not find IP addresses: %v", err)
